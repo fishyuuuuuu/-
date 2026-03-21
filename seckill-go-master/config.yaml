@@ -1,0 +1,17 @@
+database:
+  dsn: "root:natie111@tcp(localhost:3306)/seckill?charset=utf8mb4&parseTime=True&loc=Local"
+  max_open_conns: 100
+  max_idle_conns: 20
+  log_level: "info"
+
+redis:
+  addr: "localhost:6379"  # Redis 地址
+  password: ""            # Redis 密码（为空则无密码）
+  db: 0                   # Redis 数据库编号
+  pool_size: 16           # 连接池大小
+# RabbitMQ配置
+rabbitmq:
+  host: "localhost"
+  port: 5672
+  username: "fish"
+  password: "natie111"
