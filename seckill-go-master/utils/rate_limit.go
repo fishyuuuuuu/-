@@ -326,6 +326,8 @@ func (iprl *IPRateLimiter) Cleanup() {
 type GlobalRateLimiter struct {
 	limiter     *RateLimiter
 	redisClient *redis.Client
+	capacity    int
+	rate        int
 }
 
 // NewGlobalRateLimiter 创建一个新的全局速率限制器
@@ -333,6 +335,8 @@ func NewGlobalRateLimiter(capacity, rate int, redisClient *redis.Client) *Global
 	return &GlobalRateLimiter{
 		limiter:     NewRateLimiter(capacity, rate),
 		redisClient: redisClient,
+		capacity:    capacity,
+		rate:        rate,
 	}
 }
 
@@ -384,7 +388,7 @@ func (grl *GlobalRateLimiter) allowWithRedis() (bool, error) {
 	end
 	`
 
-	result, err := grl.redisClient.Eval(ctx, luaScript, []string{key}, 1000, 100, time.Now().UnixMilli()).Result()
+	result, err := grl.redisClient.Eval(ctx, luaScript, []string{key}, grl.capacity, grl.rate, time.Now().UnixMilli()).Result()
 	if err != nil {
 		return false, err
 	}

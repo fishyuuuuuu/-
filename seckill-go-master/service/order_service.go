@@ -6,6 +6,7 @@ import (
 	"seckill_go/db"
 	"seckill_go/model"
 	"seckill_go/utils"
+	"strconv"
 	"sync"
 	"time"
 
@@ -108,6 +109,7 @@ func CreateMockOrder(userID uint, productID uint) (map[string]interface{}, error
 
 	newOrder := map[string]interface{}{
 		"id":           nextOrderID,
+		"order_no":     "MOCK" + strconv.FormatInt(time.Now().UnixNano(), 10),
 		"user_id":      userID,
 		"user_name":    userName,
 		"product_id":   productID,
@@ -136,6 +138,7 @@ func GetOrderList(ctx context.Context, userID uint) ([]map[string]interface{}, e
 
 				result = append(result, map[string]interface{}{
 					"id":           order.ID,
+					"order_no":     order.OrderNo,
 					"user_id":      order.UserID,
 					"product_id":   order.ProductID,
 					"product_name": product.Name,
@@ -152,9 +155,10 @@ func GetOrderList(ctx context.Context, userID uint) ([]map[string]interface{}, e
 	defer mockOrdersMu.RUnlock()
 
 	for _, order := range mockOrders {
-		if order["user_id"].(uint) == userID {
+		if toUint(order["user_id"]) == userID {
 			result = append(result, map[string]interface{}{
 				"id":           order["id"],
+				"order_no":     order["order_no"],
 				"user_id":      order["user_id"],
 				"product_id":   order["product_id"],
 				"product_name": order["product_name"],
@@ -185,6 +189,7 @@ func GetAllOrders(ctx context.Context) ([]map[string]interface{}, error) {
 
 				result = append(result, map[string]interface{}{
 					"id":           order.ID,
+					"order_no":     order.OrderNo,
 					"user_id":      order.UserID,
 					"user_name":    user.Username,
 					"product_id":   order.ProductID,
@@ -205,6 +210,7 @@ func GetAllOrders(ctx context.Context) ([]map[string]interface{}, error) {
 	for _, order := range mockOrders {
 		result = append(result, map[string]interface{}{
 			"id":           order["id"],
+			"order_no":     order["order_no"],
 			"user_id":      order["user_id"],
 			"user_name":    order["user_name"],
 			"product_id":   order["product_id"],
@@ -230,6 +236,7 @@ func GetOrderByID(ctx context.Context, id uint, userID uint) (map[string]interfa
 
 				return map[string]interface{}{
 					"id":           order.ID,
+					"order_no":     order.OrderNo,
 					"user_id":      order.UserID,
 					"product_id":   order.ProductID,
 					"product_name": product.Name,
@@ -247,10 +254,11 @@ func GetOrderByID(ctx context.Context, id uint, userID uint) (map[string]interfa
 	defer mockOrdersMu.RUnlock()
 
 	for _, order := range mockOrders {
-		if order["id"].(uint) == id {
-			if order["user_id"].(uint) == userID {
+		if toUint(order["id"]) == id {
+			if toUint(order["user_id"]) == userID {
 				return map[string]interface{}{
 					"id":           order["id"],
+					"order_no":     order["order_no"],
 					"user_id":      order["user_id"],
 					"product_id":   order["product_id"],
 					"product_name": order["product_name"],
@@ -281,6 +289,7 @@ func GetOrderByIDAdmin(ctx context.Context, id uint) (map[string]interface{}, er
 
 			return map[string]interface{}{
 				"id":           order.ID,
+				"order_no":     order.OrderNo,
 				"user_id":      order.UserID,
 				"user_name":    user.Username,
 				"product_id":   order.ProductID,
@@ -296,9 +305,10 @@ func GetOrderByIDAdmin(ctx context.Context, id uint) (map[string]interface{}, er
 	defer mockOrdersMu.RUnlock()
 
 	for _, order := range mockOrders {
-		if order["id"].(uint) == id {
+		if toUint(order["id"]) == id {
 			return map[string]interface{}{
 				"id":           order["id"],
+				"order_no":     order["order_no"],
 				"user_id":      order["user_id"],
 				"user_name":    order["user_name"],
 				"product_id":   order["product_id"],
@@ -341,13 +351,13 @@ func CancelOrder(ctx context.Context, id uint, userID uint) error {
 	defer mockOrdersMu.Unlock()
 
 	for i, order := range mockOrders {
-		if order["id"].(uint) == id {
-			if order["user_id"].(uint) != userID {
+		if toUint(order["id"]) == id {
+			if toUint(order["user_id"]) != userID {
 				utils.Logger.Warn("订单不属于当前用户", zap.Uint("orderID", id), zap.Uint("userID", userID))
 				return ErrOrderNotFound
 			}
-			if order["status"].(int) != 0 {
-				utils.Logger.Warn("订单状态不允许取消", zap.Uint("orderID", id), zap.Int("status", order["status"].(int)))
+			if toInt(order["status"]) != 0 {
+				utils.Logger.Warn("订单状态不允许取消", zap.Uint("orderID", id), zap.Int("status", toInt(order["status"])))
 				return ErrOrderNotCancelable
 			}
 			mockOrders[i]["status"] = 2
@@ -389,7 +399,7 @@ func UpdateOrderStatus(ctx context.Context, id uint, status model.OrderStatus) e
 	defer mockOrdersMu.Unlock()
 
 	for i, order := range mockOrders {
-		if order["id"].(uint) == id {
+		if toUint(order["id"]) == id {
 			mockOrders[i]["status"] = int(status)
 			utils.Logger.Info("订单状态更新成功", zap.Uint("id", id), zap.Int("status", int(status)))
 			return nil
@@ -398,4 +408,38 @@ func UpdateOrderStatus(ctx context.Context, id uint, status model.OrderStatus) e
 
 	utils.Logger.Warn("订单不存在", zap.Uint("id", id))
 	return ErrOrderNotFound
+}
+
+func toUint(value interface{}) uint {
+	switch v := value.(type) {
+	case uint:
+		return v
+	case uint64:
+		return uint(v)
+	case int:
+		return uint(v)
+	case int64:
+		return uint(v)
+	case float64:
+		return uint(v)
+	default:
+		return 0
+	}
+}
+
+func toInt(value interface{}) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case uint:
+		return int(v)
+	case uint64:
+		return int(v)
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
 }

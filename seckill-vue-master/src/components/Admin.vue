@@ -607,15 +607,12 @@
                   </td>
                   <td>
                     <div class="action-buttons">
-                      <button class="btn-icon" title="发货" @click="updateOrderStatus(order.id, 2)" v-if="order.status === 'paid'">
+                      <button class="btn-icon" title="标记已支付" @click="updateOrderStatus(order.id, 1)" v-if="order.status === 'pending'">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                          <rect x="1" y="3" width="15" height="13"></rect>
-                          <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
-                          <circle cx="5.5" cy="18.5" r="2.5"></circle>
-                          <circle cx="18.5" cy="18.5" r="2.5"></circle>
+                          <path d="M20 6L9 17l-5-5"></path>
                         </svg>
                       </button>
-                      <button class="btn-icon" title="取消" @click="updateOrderStatus(order.id, 4)" v-if="['pending', 'paid'].includes(order.status)">
+                      <button class="btn-icon danger" title="取消" @click="updateOrderStatus(order.id, 2)" v-if="order.status === 'pending'">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                           <circle cx="12" cy="12" r="10"></circle>
                           <line x1="15" y1="9" x2="9" y2="15"></line>
@@ -710,6 +707,32 @@
           </div>
         </div>
 
+        <div v-else-if="activeMenu === 'stress'" class="content-section integrated-section">
+          <div class="integrated-header">
+            <div>
+              <h2 class="section-title">高并发测试</h2>
+              <p class="section-subtitle">集中管理压测参数、实时指标与趋势分析</p>
+            </div>
+            <span class="integrated-badge">Performance Lab</span>
+          </div>
+          <div class="integrated-panel">
+            <StressTest :embedded="true" />
+          </div>
+        </div>
+
+        <div v-else-if="activeMenu === 'security'" class="content-section integrated-section">
+          <div class="integrated-header">
+            <div>
+              <h2 class="section-title">安全可视化</h2>
+              <p class="section-subtitle">集中展示限流、权限与安全事件状态</p>
+            </div>
+            <span class="integrated-badge">Security Center</span>
+          </div>
+          <div class="integrated-panel">
+            <SecurityVisualization :embedded="true" />
+          </div>
+        </div>
+
         <!-- 操作日志 -->
         <div v-else-if="activeMenu === 'logs'" class="content-section">
           <div class="section-header">
@@ -777,10 +800,13 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import axios from 'axios';
+import StressTest from './StressTest.vue';
+import SecurityVisualization from './SecurityVisualization.vue';
 
 const router = useRouter();
+const route = useRoute();
 const activeMenu = ref('dashboard');
 
 const mainMenuItems = ref([
@@ -792,6 +818,8 @@ const mainMenuItems = ref([
 
 const systemMenuItems = ref([
   { id: 'settings', label: '系统设置', icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 0v9m0-9a3 3 0 0 1 0-6 3 3 0 0 1 0 6zm0 0H9m3 0h3 M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 1 6 0', color: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)' },
+  { id: 'stress', label: '高并发测试', icon: 'M13 2L3 14h7l-1 8 10-12h-7z', color: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' },
+  { id: 'security', label: '安全可视化', icon: 'M12 2l7 4v6c0 5-3.5 9.5-7 10-3.5-.5-7-5-7-10V6l7-4z', color: 'linear-gradient(135deg, #10b981 0%, #059669 100%)' },
   { id: 'logs', label: '操作日志', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6 M10 18H6 M14 18h-4', color: 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)' }
 ]);
 
@@ -1073,6 +1101,17 @@ const fetchOrders = async () => {
     
   } catch (error) {
     console.error('获取订单列表失败:', error);
+    if (error.response?.status === 401) {
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_user');
+      router.push('/login');
+      return;
+    }
+    if (error.response?.status === 403) {
+      ordersError.value = '当前管理员账号缺少订单管理权限，请重新登录管理员账号';
+      orders.value = [];
+      return;
+    }
     ordersError.value = error.response?.data?.error || error.message || '获取订单列表失败';
     orders.value = []; // 确保出错时设置为空数组
   } finally {
@@ -1085,9 +1124,7 @@ const getOrderStatusKey = (status) => {
   const statusMap = {
     0: 'pending',
     1: 'paid',
-    2: 'shipped',
-    3: 'completed',
-    4: 'canceled'
+    2: 'canceled'
   };
   return statusMap[status] || 'pending';
 };
@@ -1097,9 +1134,7 @@ const getOrderStatusText = (status) => {
   const statusMap = {
     0: '待支付',
     1: '已支付',
-    2: '已发货',
-    3: '已完成',
-    4: '已取消'
+    2: '已取消'
   };
   return statusMap[status] || '待支付';
 };
@@ -1378,7 +1413,28 @@ watch(() => activeMenu.value, (newValue) => {
   }
 });
 
+watch(() => activeMenu.value, (newValue) => {
+  if (route.path === '/admin' && route.query.tab !== newValue) {
+    router.replace({
+      path: '/admin',
+      query: {
+        ...route.query,
+        tab: newValue
+      }
+    });
+  }
+});
+
 onMounted(() => {
+  const routeTab = typeof route.query.tab === 'string' ? route.query.tab : '';
+  const menuIds = new Set([
+    ...mainMenuItems.value.map(item => item.id),
+    ...systemMenuItems.value.map(item => item.id)
+  ]);
+  if (menuIds.has(routeTab)) {
+    activeMenu.value = routeTab;
+  }
+
   // 不再检查token，直接加载数据
   if (activeMenu.value === 'users') {
     fetchUsers();
@@ -1801,6 +1857,11 @@ onUnmounted(() => {
 .status-badge.completed {
   background: #d1fae5;
   color: #065f46;
+}
+
+.status-badge.canceled {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .status-badge.seckill {
@@ -2828,5 +2889,66 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.integrated-section {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.integrated-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f8faff 0%, #eef2ff 100%);
+  border: 1px solid #e5e7eb;
+  margin-bottom: 16px;
+}
+
+.section-subtitle {
+  margin: 8px 0 0;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.integrated-badge {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #111827;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.integrated-panel {
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.06);
+  overflow: hidden;
+  padding: 16px;
+}
+
+.integrated-panel :deep(.performance-test-container),
+.integrated-panel :deep(.security-visualization-container) {
+  min-height: auto;
+  background: transparent;
+}
+
+.integrated-panel :deep(.container) {
+  max-width: 100%;
+  padding: 0;
+}
+
+.integrated-panel :deep(.panel-card),
+.integrated-panel :deep(.chart-card),
+.integrated-panel :deep(.security-card),
+.integrated-panel :deep(.panel-section) {
+  box-shadow: 0 4px 12px rgba(17, 24, 39, 0.06);
+  border-color: #e5e7eb;
 }
 </style>

@@ -1,8 +1,8 @@
 <template>
-  <div class="security-visualization-container">
-    <Navbar />
+  <div class="security-visualization-container" :class="{ embedded }">
+    <Navbar v-if="!embedded" />
     
-    <div class="page-header">
+    <div v-if="!embedded" class="page-header">
       <div class="container">
         <div class="header-content">
           <div class="header-left">
@@ -296,6 +296,13 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import Navbar from './Navbar.vue';
+
+const { embedded = false } = defineProps({
+  embedded: {
+    type: Boolean,
+    default: false
+  }
+});
 
 const router = useRouter();
 
@@ -669,6 +676,11 @@ onUnmounted(() => {
 .security-visualization-container {
   min-height: 100vh;
   background: linear-gradient(135deg, #667eea10 0%, #764ba210 100%);
+}
+
+.security-visualization-container.embedded {
+  min-height: auto;
+  background: transparent;
 }
 
 .page-header {

@@ -44,11 +44,15 @@ func SeckillHandler(c *gin.Context) {
 		return
 	}
 
-	// 如果没有提供用户ID，生成一个模拟的
 	userID := req.UserId
+	if contextUserID, exists := c.Get("user_id"); exists {
+		if uid, ok := contextUserID.(uint); ok && uid > 0 {
+			userID = uid
+		}
+	}
 	if userID == 0 {
-		// 生成一个随机用户ID
-		userID = uint(1000 + (c.Request.ContentLength % 10000))
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户未登录"})
+		return
 	}
 
 	// 校验验证码，防止机器人刷单

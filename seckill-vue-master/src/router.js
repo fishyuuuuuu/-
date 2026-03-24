@@ -1,8 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainView from './components/Main.vue'
 import LoginView from './components/Login.vue'
-import StressTestView from './components/StressTest.vue'
-import SecurityVisualizationView from './components/SecurityVisualization.vue'
 import OrderView from './components/Order.vue'
 import CategoryView from './components/Category.vue'
 import ProfileView from './components/Profile.vue'
@@ -13,8 +11,8 @@ const routes = [
     { path: '/', redirect: '/login' },
     { path: '/main', component: MainView },
     { path: '/login', component: LoginView },
-    { path: '/stress-test', component: StressTestView },
-    { path: '/security', component: SecurityVisualizationView },
+    { path: '/stress-test', redirect: '/main' },
+    { path: '/security', redirect: '/main' },
     { path: '/order', component: OrderView },
     { path: '/category', component: CategoryView },
     { path: '/profile', component: ProfileView },

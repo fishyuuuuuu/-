@@ -4,12 +4,14 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"io"
+	"os"
 )
 
-// 加密密钥，实际项目中应该从环境变量或配置文件中读取
-var encryptionKey = []byte("your-secret-key-here")
+var encryptionKey = loadEncryptionKey()
 
 // Encrypt 加密数据
 func Encrypt(data string) (string, error) {
@@ -61,7 +63,7 @@ func Decrypt(encryptedData string) (string, error) {
 	// 提取nonce
 	nonceSize := gcm.NonceSize()
 	if len(ciphertext) < nonceSize {
-		return "", err
+		return "", errors.New("加密数据格式错误")
 	}
 	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
 
@@ -72,4 +74,13 @@ func Decrypt(encryptedData string) (string, error) {
 	}
 
 	return string(plaintext), nil
+}
+
+func loadEncryptionKey() []byte {
+	source := os.Getenv("ENCRYPTION_KEY")
+	if source == "" {
+		source = "your-secret-key-here"
+	}
+	sum := sha256.Sum256([]byte(source))
+	return sum[:]
 }

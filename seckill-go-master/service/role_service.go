@@ -106,6 +106,16 @@ func CheckPermission(userID uint, permissionCode string) (bool, error) {
 		return false, ErrUserNotFound
 	}
 
+	var roleCount int64
+	db.DB.Model(&user).
+		Joins("JOIN user_roles ON users.id = user_roles.user_id").
+		Joins("JOIN roles ON user_roles.role_id = roles.id").
+		Where("users.id = ? AND roles.name = ?", userID, "管理员").
+		Count(&roleCount)
+	if roleCount > 0 {
+		return true, nil
+	}
+
 	// 查询用户是否有指定权限
 	var count int64
 	db.DB.Model(&user).Joins("JOIN user_roles ON users.id = user_roles.user_id").Joins("JOIN role_permissions ON user_roles.role_id = role_permissions.role_id").Joins("JOIN permissions ON role_permissions.permission_id = permissions.id").Where("users.id = ? AND permissions.code = ?", userID, permissionCode).Count(&count)
@@ -129,6 +139,10 @@ func InitDefaultRoles() error {
 		{Name: "开始活动", Code: "event:start", Description: "开始活动"},
 		{Name: "停止活动", Code: "event:stop", Description: "停止活动"},
 		{Name: "查看订单", Code: "order:view", Description: "查看订单列表和详情"},
+		{Name: "管理订单读取", Code: "order:read", Description: "读取全部订单"},
+		{Name: "管理订单更新", Code: "order:update", Description: "更新订单状态"},
+		{Name: "安全配置读取", Code: "security:read", Description: "查看安全配置和统计"},
+		{Name: "安全配置写入", Code: "security:write", Description: "修改安全配置和黑名单"},
 	}
 
 	for _, permission := range permissions {

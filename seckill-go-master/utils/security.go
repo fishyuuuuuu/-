@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,6 +59,7 @@ type SecurityManager struct {
 
 var securityManager *SecurityManager
 var securityManagerOnce sync.Once
+var suspiciousInputPattern = regexp.MustCompile(`(?i)(\b(select|union|insert|update|delete|drop|truncate|alter|exec|sleep|benchmark)\b|--|/\*|\*/|;)`)
 
 // GetSecurityManager 获取安全管理器实例
 func GetSecurityManager() *SecurityManager {
@@ -108,16 +111,14 @@ func (sm *SecurityManager) SecurityCheck(c *gin.Context) (bool, *SecurityError) 
 	}
 
 	// 4. 用户限流检查（如果已登录）
-	if userID, exists := c.Get("userID"); exists {
-		if uid, ok := userID.(uint); ok {
-			userLimiter := sm.getUserLimiter(uid)
-			if !userLimiter.Allow(uid) {
-				sm.recordLimitEvent(c, "user")
-				return false, &SecurityError{
-					Code:    http.StatusTooManyRequests,
-					Message: "请求过于频繁，请稍后再试",
-					Reason:  "user_rate_limit",
-				}
+	if uid, ok := getContextUserID(c); ok {
+		userLimiter := sm.getUserLimiter(uid)
+		if !userLimiter.Allow(uid) {
+			sm.recordLimitEvent(c, "user")
+			return false, &SecurityError{
+				Code:    http.StatusTooManyRequests,
+				Message: "请求过于频繁，请稍后再试",
+				Reason:  "user_rate_limit",
 			}
 		}
 	}
@@ -151,14 +152,12 @@ func (sm *SecurityManager) IsBlocked(c *gin.Context) (bool, string) {
 	}
 
 	// 检查用户黑名单
-	if userID, exists := c.Get("userID"); exists {
-		if uid, ok := userID.(uint); ok {
-			userKey := BlacklistKeyPrefix + "user:" + strconv.Itoa(int(uid))
-			if sm.redis != nil {
-				exists, _ := sm.redis.Exists(ctx, userKey).Result()
-				if exists > 0 {
-					return true, "user_blacklist"
-				}
+	if uid, ok := getContextUserID(c); ok {
+		userKey := BlacklistKeyPrefix + "user:" + strconv.Itoa(int(uid))
+		if sm.redis != nil {
+			exists, _ := sm.redis.Exists(ctx, userKey).Result()
+			if exists > 0 {
+				return true, "user_blacklist"
 			}
 		}
 	}
@@ -298,23 +297,35 @@ func (sm *SecurityManager) RecordFailedRequest(ctx context.Context, c *gin.Conte
 	}
 
 	// 用户维度统计
-	if userID, exists := c.Get("userID"); exists {
-		if uid, ok := userID.(uint); ok {
-			userFailKey := fmt.Sprintf("security:fail:user:%d:%s", uid, failType)
+	if uid, ok := getContextUserID(c); ok {
+		userFailKey := fmt.Sprintf("security:fail:user:%d:%s", uid, failType)
 
-			if sm.redis != nil {
-				count, _ := sm.redis.Incr(ctx, userFailKey).Result()
-				sm.redis.Expire(ctx, userFailKey, 10*time.Minute)
+		if sm.redis != nil {
+			count, _ := sm.redis.Incr(ctx, userFailKey).Result()
+			sm.redis.Expire(ctx, userFailKey, 10*time.Minute)
 
-				if failType == "captcha" && count >= int64(UserCaptchaThreshold) {
-					sm.AddToBlacklist(ctx, "user", strconv.Itoa(int(uid)), "验证码错误次数过多")
-				}
-				if failType == "order" && count >= int64(UserOrderThreshold) {
-					sm.AddToBlacklist(ctx, "user", strconv.Itoa(int(uid)), "订单创建失败次数过多")
-				}
+			if failType == "captcha" && count >= int64(UserCaptchaThreshold) {
+				sm.AddToBlacklist(ctx, "user", strconv.Itoa(int(uid)), "验证码错误次数过多")
+			}
+			if failType == "order" && count >= int64(UserOrderThreshold) {
+				sm.AddToBlacklist(ctx, "user", strconv.Itoa(int(uid)), "订单创建失败次数过多")
 			}
 		}
 	}
+}
+
+func getContextUserID(c *gin.Context) (uint, bool) {
+	if value, exists := c.Get("user_id"); exists {
+		if uid, ok := value.(uint); ok && uid > 0 {
+			return uid, true
+		}
+	}
+	if value, exists := c.Get("userID"); exists {
+		if uid, ok := value.(uint); ok && uid > 0 {
+			return uid, true
+		}
+	}
+	return 0, false
 }
 
 // getIPLimiter 获取IP限流器
@@ -418,6 +429,21 @@ func (sm *SecurityManager) GetSecurityStats(ctx context.Context) map[string]inte
 // SecurityMiddleware 安全中间件
 func SecurityMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if c.Request.URL.Path == "/api/captcha" {
+			c.Next()
+			return
+		}
+
+		if hasSuspiciousInput(c) {
+			sm := GetSecurityManager()
+			sm.RecordFailedRequest(context.Background(), c, "sql_injection")
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "请求参数包含非法内容",
+			})
+			c.Abort()
+			return
+		}
+
 		// 获取安全管理器
 		sm := GetSecurityManager()
 
@@ -435,6 +461,33 @@ func SecurityMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func hasSuspiciousInput(c *gin.Context) bool {
+	rawQuery := c.Request.URL.RawQuery
+	if suspiciousInputPattern.MatchString(rawQuery) {
+		return true
+	}
+	if suspiciousInputPattern.MatchString(c.Request.URL.Path) {
+		return true
+	}
+	for _, values := range c.Request.URL.Query() {
+		for _, value := range values {
+			if suspiciousInputPattern.MatchString(value) {
+				return true
+			}
+		}
+	}
+	if err := c.Request.ParseForm(); err == nil {
+		for _, values := range c.Request.PostForm {
+			for _, value := range values {
+				if suspiciousInputPattern.MatchString(strings.TrimSpace(value)) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // CaptchaSecurityMiddleware 验证码安全中间件

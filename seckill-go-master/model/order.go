@@ -17,6 +17,7 @@ const (
 // Order 订单表模型
 type Order struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`                            // 主键ID
+	OrderNo     string         `gorm:"size:64;uniqueIndex;not null" json:"order_no"`    // 订单号
 	UserID      uint           `gorm:"not null;index" json:"user_id"`                   // 关联用户ID
 	ProductID   uint           `gorm:"not null;index" json:"product_id"`                // 关联商品ID
 	OrderAmount float64        `gorm:"type:decimal(10,2);not null" json:"order_amount"` // 订单金额

@@ -65,7 +65,7 @@ func Init() *gin.Engine {
 		{
 			product.GET("/list", controller.GetProductListHandler)
 			// 秒杀接口使用增强的安全中间件
-		product.POST("/seckill", utils.BehaviorAnalysisMiddleware(), utils.CaptchaSecurityMiddleware(), utils.RateLimitMiddleware(), controller.SeckillHandler)
+			product.POST("/seckill", controller.AuthMiddleware(), utils.BehaviorAnalysisMiddleware(), utils.CaptchaSecurityMiddleware(), utils.RateLimitMiddleware(), controller.SeckillHandler)
 			product.POST("/reset-stock", controller.ResetProductStockHandler) // 重置库存（测试用）
 			product.POST("/clear-test-data", controller.ClearTestDataHandler) // 清理测试数据（测试用）
 			// 商品管理接口，需要认证和权限

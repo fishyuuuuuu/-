@@ -1,14 +1,15 @@
 package main
 
 import (
-	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 	"log"
 	"seckill2_go/config"
 	"seckill2_go/db"
 	"seckill2_go/rabbitmq"
 	"seckill2_go/service"
 	"seckill2_go/utils"
+
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 func main() {

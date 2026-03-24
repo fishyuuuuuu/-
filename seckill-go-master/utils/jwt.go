@@ -2,6 +2,7 @@ package utils
 
 import (
 	"errors"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -13,6 +14,12 @@ var (
 	ErrExpiredToken = errors.New("令牌已过期")
 )
 
+const (
+	defaultJWTSecret = "your-secret-key"
+	jwtIssuer        = "seckill_go"
+	jwtTTL           = 24 * time.Hour
+)
+
 // 定义JWT声明结构
 type Claims struct {
 	UserID uint `json:"user_id"`
@@ -21,25 +28,22 @@ type Claims struct {
 
 // 生成JWT令牌
 func GenerateToken(userID uint) (string, error) {
-	// 设置过期时间为1天，方便测试
-	expirationTime := time.Now().Add(24 * time.Hour)
+	now := time.Now()
+	expirationTime := now.Add(jwtTTL)
 
-	// 创建声明
 	claims := &Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			Issuer:    jwtIssuer,
 			Subject:   "user_authentication",
 		},
 	}
 
-	// 创建令牌
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	// 签名令牌
-	// 注意：在生产环境中，应该使用环境变量或配置文件中的密钥
-	tokenString, err := token.SignedString([]byte("your-secret-key"))
+	tokenString, err := token.SignedString([]byte(getJWTSecret()))
 	if err != nil {
 		return "", err
 	}
@@ -49,16 +53,13 @@ func GenerateToken(userID uint) (string, error) {
 
 // 验证JWT令牌
 func ValidateToken(tokenString string) (*Claims, error) {
-	// 解析令牌
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		// 验证签名方法
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, ErrInvalidToken
 		}
-		// 返回密钥
-		return []byte("your-secret-key"), nil
-	})
+		return []byte(getJWTSecret()), nil
+	}, jwt.WithIssuer(jwtIssuer), jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
@@ -72,4 +73,12 @@ func ValidateToken(tokenString string) (*Claims, error) {
 	}
 
 	return claims, nil
+}
+
+func getJWTSecret() string {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		return defaultJWTSecret
+	}
+	return secret
 }

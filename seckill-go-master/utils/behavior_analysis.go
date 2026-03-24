@@ -74,10 +74,8 @@ func (ba *BehaviorAnalyzer) RecordBehavior(c *gin.Context, behaviorType string, 
 	userID := "anonymous"
 
 	// 获取用户ID（如果已登录）
-	if uid, exists := c.Get("userID"); exists {
-		if id, ok := uid.(uint); ok {
-			userID = fmt.Sprintf("%d", id)
-		}
+	if uid, ok := getContextUserID(c); ok {
+		userID = fmt.Sprintf("%d", uid)
 	}
 
 	// 创建行为记录
@@ -125,10 +123,8 @@ func (ba *BehaviorAnalyzer) AnalyzeBehavior(c *gin.Context) int {
 	userID := "anonymous"
 
 	// 获取用户ID（如果已登录）
-	if uid, exists := c.Get("userID"); exists {
-		if id, ok := uid.(uint); ok {
-			userID = fmt.Sprintf("%d", id)
-		}
+	if uid, ok := getContextUserID(c); ok {
+		userID = fmt.Sprintf("%d", uid)
 	}
 
 	riskScore := 0

@@ -1876,7 +1876,7 @@ const submitSeckill = async (productId, product) => {
     }
 
     // 调用后端秒杀API
-    const response = await axios.post('http://localhost:8081/api/product/seckill', {
+    const response = await axios.post('/api/product/seckill', {
       productId: productId,
       captchaId: captchaId.value,
       captchaStr: captchaInput.value
@@ -4671,4 +4671,3 @@ onMounted(async () => {
   }
 }
 </style>
-

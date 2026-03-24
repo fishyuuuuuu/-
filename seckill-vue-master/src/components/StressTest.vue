@@ -1,8 +1,8 @@
 <template>
-  <div class="performance-test-container">
-    <Navbar />
+  <div class="performance-test-container" :class="{ embedded }">
+    <Navbar v-if="!embedded" />
     
-    <div class="page-header">
+    <div v-if="!embedded" class="page-header">
       <div class="container">
         <div class="header-content">
           <div class="header-title">
@@ -602,6 +602,13 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import axios from 'axios';
 import Navbar from './Navbar.vue';
+
+const { embedded = false } = defineProps({
+  embedded: {
+    type: Boolean,
+    default: false
+  }
+});
 
 const config = reactive({
   productId: 1,
@@ -1250,6 +1257,12 @@ onUnmounted(() => {
   min-height: 100vh;
   background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
   padding-bottom: 40px;
+}
+
+.performance-test-container.embedded {
+  min-height: auto;
+  background: transparent;
+  padding-bottom: 0;
 }
 
 .page-header {

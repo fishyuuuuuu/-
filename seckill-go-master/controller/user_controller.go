@@ -13,20 +13,20 @@ import (
 
 // LoginRequest 登录请求结构
 type LoginRequest struct {
-	Username    string `json:"username"`
-	Phone       string `json:"phone"`
-	Password    string `json:"password"`
-	CaptchaID   string `json:"captcha_id"`
-	CaptchaCode string `json:"captcha_code"`
+	Username    string `json:"username" binding:"required_without=Phone,omitempty,min=2,max=50"`
+	Phone       string `json:"phone" binding:"required_without=Username,omitempty,min=5,max=20"`
+	Password    string `json:"password" binding:"required,min=6,max=72"`
+	CaptchaID   string `json:"captcha_id" binding:"required"`
+	CaptchaCode string `json:"captcha_code" binding:"required,min=4,max=8"`
 }
 
 // RegisterRequest 注册请求结构
 type RegisterRequest struct {
-	Username    string `json:"username"`
-	Phone       string `json:"phone"`
-	Password    string `json:"password"`
-	CaptchaID   string `json:"captcha_id"`
-	CaptchaCode string `json:"captcha_code"`
+	Username    string `json:"username" binding:"required,min=2,max=50"`
+	Phone       string `json:"phone" binding:"required,min=5,max=20"`
+	Password    string `json:"password" binding:"required,min=6,max=72"`
+	CaptchaID   string `json:"captcha_id" binding:"required"`
+	CaptchaCode string `json:"captcha_code" binding:"required,min=4,max=8"`
 }
 
 // RegisterHandler 处理用户注册请求
@@ -46,8 +46,7 @@ func RegisterHandler(c *gin.Context) {
 	// 验证验证码
 	if !utils.VerifyCaptcha(req.CaptchaID, req.CaptchaCode) {
 		utils.Logger.Warn("验证码错误",
-			zap.String("captcha_id", req.CaptchaID),
-			zap.String("captcha_code", req.CaptchaCode))
+			zap.String("captcha_id", req.CaptchaID))
 		utils.AuditRegister(req.Username, false, c.ClientIP())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码错误或已过期"})
 		return
@@ -94,8 +93,7 @@ func LoginHandler(c *gin.Context) {
 	// 验证验证码
 	if !utils.VerifyCaptcha(req.CaptchaID, req.CaptchaCode) {
 		utils.Logger.Warn("验证码错误",
-			zap.String("captcha_id", req.CaptchaID),
-			zap.String("captcha_code", req.CaptchaCode))
+			zap.String("captcha_id", req.CaptchaID))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码错误或已过期"})
 		return
 	}
@@ -329,6 +327,7 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		// 将用户ID存储到上下文中
 		c.Set("user_id", claims.UserID)
+		c.Set("userID", claims.UserID)
 		c.Next()
 	}
 }

@@ -3,9 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"seckill_go/db"
+	"seckill_go/model"
 	"seckill_go/rabbitmq"
 	"seckill_go/utils"
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -84,26 +87,55 @@ func ReduceProductStock(ctx context.Context, productID uint, userID string) erro
 	// 秒杀成功，异步创建订单，减少同步操作开销
 	go func() {
 		userIDUint, _ := strconv.ParseUint(userID, 10, 64)
+		if db.DB != nil {
+			var product model.Product
+			if err := db.DB.First(&product, productID).Error; err == nil {
+				order := model.Order{
+					OrderNo:     "SK" + strconv.FormatInt(time.Now().UnixNano(), 10),
+					UserID:      uint(userIDUint),
+					ProductID:   productID,
+					OrderAmount: product.Price,
+					Status:      model.OrderStatusPending,
+				}
+				if err := db.DB.Create(&order).Error; err != nil {
+					utils.Logger.Error("创建订单失败",
+						zap.Uint("productID", productID),
+						zap.String("userID", userID),
+						zap.Error(err))
+				} else {
+					utils.Logger.Info("订单创建成功",
+						zap.Uint("productID", productID),
+						zap.String("userID", userID),
+						zap.Uint("orderID", order.ID))
+					return
+				}
+			} else {
+				utils.Logger.Error("查询商品失败，降级到模拟订单",
+					zap.Uint("productID", productID),
+					zap.String("userID", userID),
+					zap.Error(err))
+			}
+		}
+
 		_, err = CreateMockOrder(uint(userIDUint), productID)
 		if err != nil {
 			utils.Logger.Error("创建订单失败",
 				zap.Uint("productID", productID),
 				zap.String("userID", userID),
 				zap.Error(err))
-			// 订单创建失败不影响秒杀成功，记录日志即可
+			return
+		}
+
+		err = PublishOrderMessageReliably(context.Background(), userID, strconv.Itoa(int(productID)))
+		if err != nil {
+			utils.Logger.Error("订单消息发送失败",
+				zap.Uint("productID", productID),
+				zap.String("userID", userID),
+				zap.Error(err))
 		} else {
 			utils.Logger.Info("订单创建成功",
 				zap.Uint("productID", productID),
 				zap.String("userID", userID))
-		}
-
-		// 异步发送消息队列，不阻塞主流程
-		err = PublishOrderMessageReliably(context.Background(), userID, strconv.Itoa(int(productID)))
-		if err != nil {
-			utils.Logger.Error("订单消息发送失败，库存已扣减",
-				zap.Uint("productID", productID),
-				zap.String("userID", userID),
-				zap.Error(err))
 		}
 	}()
 

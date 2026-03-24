@@ -501,6 +501,9 @@ const showToast = (message, type = 'success', duration = 3000) => {
 const fetchCaptcha = async () => {
   try {
     const response = await axios.get('/api/captcha', {
+      params: {
+        t: Date.now()
+      },
       responseType: 'blob',
       headers: {
         'Cache-Control': 'no-cache'
@@ -517,7 +520,12 @@ const fetchCaptcha = async () => {
     captchaImageUrl.value = URL.createObjectURL(blob);
   } catch (e) {
     console.error('获取验证码失败', e);
-    showToast('获取验证码失败，请刷新页面重试', 'error');
+    const status = e?.response?.status;
+    if (status === 429) {
+      showToast('请求过于频繁，请稍后再试', 'error');
+      return;
+    }
+    showToast('获取验证码失败，请检查后端服务', 'error');
   }
 };
 
@@ -634,7 +642,7 @@ const handleSubmit = async () => {
   try {
     if (isAdminMode.value) {
       const response = await axios.post('/api/user/login', {
-        phone: formData.username,
+        username: formData.username,
         password: formData.password,
         captcha_id: captchaId.value,
         captcha_code: captchaCode.value

@@ -10,8 +10,6 @@
         <router-link to="/upcoming" class="nav-item" active-class="active">即将开始</router-link>
         <router-link to="/order" class="nav-item" active-class="active">我的订单</router-link>
         <router-link to="/profile" class="nav-item" active-class="active">个人中心</router-link>
-        <router-link to="/stress-test" class="nav-item" active-class="active">高并发测试</router-link>
-        <router-link to="/security" class="nav-item" active-class="active">安全可视化</router-link>
       </div>
       <div class="navbar-user">
         <span class="user-info" v-if="userId">欢迎，用户{{ userId }}</span>
@@ -136,4 +134,3 @@ const logout = () => {
   }
 }
 </style>
-
