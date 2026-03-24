@@ -1,0 +1,74 @@
+{
+  "startTime": "2026-03-22T14:24:51.287Z",
+  "normalUsers": {
+    "total": 25,
+    "successful": 0,
+    "failed": 25,
+    "errorMessages": [
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500"
+    ]
+  },
+  "scriptUsers": {
+    "total": 25,
+    "successful": 10,
+    "failed": 15,
+    "errorMessages": [
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500",
+      "Request failed with status code 500"
+    ]
+  },
+  "systemMetrics": {
+    "responseTimes": [
+      12,
+      157,
+      156,
+      167,
+      159,
+      164,
+      158,
+      174,
+      164,
+      193
+    ],
+    "successRate": 20,
+    "averageResponseTime": 150.4
+  },
+  "endTime": "2026-03-22T14:24:53.221Z"
+}

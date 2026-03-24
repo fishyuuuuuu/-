@@ -1,0 +1,75 @@
+package main
+
+import (
+	"fmt"
+	"seckill_go/config"
+	"seckill_go/db"
+	"seckill_go/model"
+	"seckill_go/utils"
+
+	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
+)
+
+func main() {
+	// 初始化配置
+	err := config.Init()
+	if err != nil {
+		fmt.Printf("配置初始化失败: %v\n", err)
+		return
+	}
+
+	// 初始化数据库
+	err = db.Init()
+	if err != nil {
+		fmt.Printf("数据库初始化失败: %v\n", err)
+		return
+	}
+	defer db.Close()
+
+	// 初始化日志
+	utils.InitLogger()
+	defer utils.Logger.Sync()
+
+	// 重置管理员密码
+	adminPassword := "admin123"
+
+	// 加密密码
+	hashed, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+	if err != nil {
+		utils.Logger.Error("加密管理员密码失败", zap.Error(err))
+		return
+	}
+
+	// 查找管理员用户（先通过用户名查找）
+	var user model.User
+	err = db.DB.Where("username = ?", "admin").First(&user).Error
+	if err != nil {
+		// 如果用户不存在，创建新的管理员用户
+		user = model.User{
+			Phone:    "13800138000", // 使用手机号作为登录凭证
+			Username: "admin",
+			Password: string(hashed),
+		}
+		err = db.DB.Create(&user).Error
+		if err != nil {
+			utils.Logger.Error("创建管理员用户失败", zap.Error(err))
+			return
+		}
+		fmt.Println("管理员用户创建成功！")
+	} else {
+		// 更新密码和手机号
+		user.Password = string(hashed)
+		user.Phone = "13800138000" // 设置手机号作为登录凭证
+		err = db.DB.Save(&user).Error
+		if err != nil {
+			utils.Logger.Error("更新管理员密码失败", zap.Error(err))
+			return
+		}
+		fmt.Println("管理员密码更新成功！")
+	}
+
+	fmt.Println("管理员密码重置成功！")
+	fmt.Printf("管理员账号: %s\n", user.Phone)
+	fmt.Printf("管理员密码: %s\n", adminPassword)
+}

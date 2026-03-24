@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"seckill_go/config"
 	"seckill_go/db"
 	"seckill_go/rabbitmq"
@@ -39,6 +40,12 @@ func main() {
 		} else {
 			utils.Logger.Info("默认角色和权限初始化成功")
 		}
+		// 初始化默认管理员用户
+		if err := service.InitDefaultAdminUser(); err != nil {
+			utils.Logger.Warn("初始化默认管理员用户失败", zap.Error(err))
+		} else {
+			utils.Logger.Info("默认管理员用户初始化成功")
+		}
 		// 数据库连接关闭
 		defer func() {
 			if err := db.Close(); err != nil {
@@ -54,6 +61,10 @@ func main() {
 	} else {
 		utils.SetRedisClient(db.Redis)
 		utils.Logger.Info("Redis客户端已注入限流器")
+
+		// 设置安全模块的Redis客户端
+		utils.SetSecurityRedis(db.Redis)
+		utils.Logger.Info("安全模块Redis客户端已设置")
 
 		// 初始化库存服务并预热库存
 		stockService := service.GetStockService()
@@ -101,6 +112,16 @@ func main() {
 			}
 		}()
 	}
+	// 创建必要的目录
+	uploadDirs := []string{"./uploads/images", "./temp"}
+	for _, dir := range uploadDirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			utils.Logger.Warn("创建目录失败", zap.String("dir", dir), zap.Error(err))
+		} else {
+			utils.Logger.Info("目录创建成功", zap.String("dir", dir))
+		}
+	}
+
 	// 6. 初始化路由
 	r := router.Init()
 	// 启动性能指标服务器

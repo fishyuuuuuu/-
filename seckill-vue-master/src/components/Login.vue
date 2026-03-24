@@ -316,6 +316,46 @@
             </div>
           </transition>
 
+          <!-- 验证码 -->
+          <div class="form-group">
+            <label class="form-label">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              验证码
+            </label>
+            <div class="captcha-wrapper">
+              <div class="input-wrapper captcha-input" :class="{ 'has-error': errors.captcha, 'has-value': captchaCode }">
+                <input
+                  type="text"
+                  v-model="captchaCode"
+                  class="form-input"
+                  placeholder="请输入验证码"
+                  maxlength="4"
+                  required
+                >
+                <div class="input-focus-border"></div>
+              </div>
+              <div class="captcha-image-wrapper" @click="refreshCaptcha" title="点击刷新验证码">
+                <img v-if="captchaImageUrl" :src="captchaImageUrl" alt="验证码" class="captcha-image">
+                <div v-else class="captcha-loading">
+                  <span class="spinner-small"></span>
+                </div>
+              </div>
+            </div>
+            <transition name="error-fade">
+              <p v-if="errors.captcha" class="error-message">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                {{ errors.captcha }}
+              </p>
+            </transition>
+          </div>
+
           <!-- 记住我 & 忘记密码 -->
           <div v-if="isLoginMode" class="form-options">
             <label class="checkbox-wrapper">
@@ -408,7 +448,7 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue';
+import { ref, reactive, onMounted, onUnmounted } from 'vue';
 import axios from "axios";
 import { useRouter } from 'vue-router';
 
@@ -420,6 +460,11 @@ const isAdminMode = ref(false);
 const isLoading = ref(false);
 const showPassword = ref(false);
 const showConfirmPassword = ref(false);
+
+// 验证码相关
+const captchaId = ref('');
+const captchaCode = ref('');
+const captchaImageUrl = ref('');
 
 const formData = reactive({
   username: '',
@@ -450,6 +495,36 @@ const showToast = (message, type = 'success', duration = 3000) => {
   window.toastTimer = setTimeout(() => {
     toast.show = false;
   }, duration);
+};
+
+// 获取验证码
+const fetchCaptcha = async () => {
+  try {
+    const response = await axios.get('/api/captcha', {
+      responseType: 'blob',
+      headers: {
+        'Cache-Control': 'no-cache'
+      }
+    });
+    
+    captchaId.value = response.headers['x-captcha-id'] || '';
+    
+    if (captchaImageUrl.value) {
+      URL.revokeObjectURL(captchaImageUrl.value);
+    }
+    
+    const blob = new Blob([response.data], { type: 'image/png' });
+    captchaImageUrl.value = URL.createObjectURL(blob);
+  } catch (e) {
+    console.error('获取验证码失败', e);
+    showToast('获取验证码失败，请刷新页面重试', 'error');
+  }
+};
+
+// 刷新验证码
+const refreshCaptcha = () => {
+  captchaCode.value = '';
+  fetchCaptcha();
 };
 
 // 切换到登录模式
@@ -534,6 +609,15 @@ const validateForm = () => {
     isValid = false;
   }
 
+  // 验证码验证
+  if (!captchaCode.value) {
+    newErrors.captcha = '请输入验证码';
+    isValid = false;
+  } else if (captchaCode.value.length !== 4) {
+    newErrors.captcha = '验证码为4位数字';
+    isValid = false;
+  }
+
   Object.assign(errors, newErrors);
   return isValid;
 };
@@ -549,24 +633,29 @@ const handleSubmit = async () => {
 
   try {
     if (isAdminMode.value) {
-      if (formData.username === 'admin' && formData.password === 'admin123') {
-        showToast('管理员登录成功！即将跳转后台', 'success');
-        localStorage.setItem('admin_token', 'admin_token_' + Date.now());
-        localStorage.setItem('admin_user', JSON.stringify({
-          username: 'admin',
-          role: 'admin',
-          loginTime: new Date().toISOString()
-        }));
-        setTimeout(() => {
-          router.push('/admin');
-        }, 1500);
-      } else {
-        showToast('管理员账号或密码错误', 'error');
-      }
+      const response = await axios.post('/api/user/login', {
+        phone: formData.username,
+        password: formData.password,
+        captcha_id: captchaId.value,
+        captcha_code: captchaCode.value
+      });
+      
+      showToast('管理员登录成功！即将跳转后台', 'success');
+      localStorage.setItem('admin_token', response.data.token);
+      localStorage.setItem('admin_user', JSON.stringify({
+        username: formData.username,
+        role: 'admin',
+        loginTime: new Date().toISOString()
+      }));
+      setTimeout(() => {
+        router.push('/admin');
+      }, 1500);
     } else if (isLoginMode.value) {
       const response = await axios.post('/api/user/login', {
         phone: formData.phone,
-        password: formData.password
+        password: formData.password,
+        captcha_id: captchaId.value,
+        captcha_code: captchaCode.value
       });
       
       showToast('登录成功！即将跳转首页', 'success');
@@ -600,7 +689,9 @@ const handleSubmit = async () => {
       const response = await axios.post('/api/user/register', {
         username: formData.username,
         phone: formData.phone,
-        password: formData.password
+        password: formData.password,
+        captcha_id: captchaId.value,
+        captcha_code: captchaCode.value
       });
       
       showToast('注册成功！请登录', 'success');
@@ -611,10 +702,23 @@ const handleSubmit = async () => {
   } catch (error) {
     const errorMsg = error.response?.data?.error || '网络异常，请稍后重试';
     showToast(errorMsg, 'error');
+    refreshCaptcha();
   } finally {
     isLoading.value = false;
   }
 };
+
+// 组件挂载时获取验证码
+onMounted(() => {
+  fetchCaptcha();
+});
+
+// 组件卸载时清理
+onUnmounted(() => {
+  if (captchaImageUrl.value) {
+    URL.revokeObjectURL(captchaImageUrl.value);
+  }
+});
 </script>
 
 <style scoped>
@@ -1141,6 +1245,63 @@ const handleSubmit = async () => {
 
 .forgot-link:hover {
   color: #764ba2;
+}
+
+/* 验证码样式 */
+.captcha-wrapper {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.captcha-input {
+  flex: 1;
+}
+
+.captcha-image-wrapper {
+  width: 120px;
+  height: 48px;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fafafa;
+  transition: all 0.3s ease;
+}
+
+.captcha-image-wrapper:hover {
+  border-color: #667eea;
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+}
+
+.captcha-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.captcha-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spinner-small {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #e0e0e0;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 提交按钮 */

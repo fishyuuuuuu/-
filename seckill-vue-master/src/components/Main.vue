@@ -3,6 +3,88 @@
     <!-- 导航栏 -->
     <Navbar />
 
+    <!-- 图片轮播区域 -->
+    <div class="carousel-section">
+      <div class="carousel-container">
+        <div class="carousel-wrapper">
+          <div 
+            class="carousel-track" 
+            :style="{ transform: `translateX(-${currentSlide * 100}%)` }"
+          >
+            <div 
+              v-for="(slide, index) in carouselSlides" 
+              :key="index" 
+              class="carousel-slide"
+            >
+              <img :src="slide.image" :alt="slide.title" class="slide-image">
+              <div class="slide-content">
+                <h2 class="slide-title">{{ slide.title }}</h2>
+                <p class="slide-subtitle">{{ slide.subtitle }}</p>
+                <button class="slide-btn" @click="handleSlideClick(slide)">
+                  {{ slide.btnText }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 轮播控制按钮 -->
+        <button class="carousel-btn prev" @click="prevSlide">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+        </button>
+        <button class="carousel-btn next" @click="nextSlide">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </button>
+        
+        <!-- 轮播指示器 -->
+        <div class="carousel-indicators">
+          <span 
+            v-for="(slide, index) in carouselSlides" 
+            :key="index"
+            :class="['indicator', { active: currentSlide === index }]"
+            @click="goToSlide(index)"
+          ></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 搜索栏 -->
+    <div class="search-section">
+      <div class="container">
+        <div class="search-wrapper">
+          <div class="search-box">
+            <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <path d="m21 21-4.35-4.35"></path>
+            </svg>
+            <input 
+              type="text" 
+              v-model="searchKeyword" 
+              placeholder="搜索商品、品牌、分类..." 
+              class="search-input"
+              @keyup.enter="handleSearch"
+            >
+            <button class="search-btn" @click="handleSearch">搜索</button>
+          </div>
+          <div class="hot-keywords">
+            <span class="hot-label">热门搜索:</span>
+            <span 
+              v-for="keyword in hotKeywords" 
+              :key="keyword" 
+              class="keyword-tag"
+              @click="searchByKeyword(keyword)"
+            >
+              {{ keyword }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 秒杀活动横幅 -->
     <div class="seckill-banner">
       <div class="banner-bg-animation"></div>
@@ -554,6 +636,44 @@ const userId = ref(localStorage.getItem('user_id'));
 const activeCategory = ref(1);
 const sortBy = ref('default');
 
+// 轮播相关状态
+const currentSlide = ref(0);
+const carouselInterval = ref(null);
+const carouselSlides = ref([
+  {
+    image: 'https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=1400&h=400&fit=crop',
+    title: 'iPhone 17 Pro Max 限时特惠',
+    subtitle: 'A19 Pro芯片，钛金属设计，最高立省2000元',
+    btnText: '立即抢购',
+    productId: 1
+  },
+  {
+    image: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=1400&h=400&fit=crop',
+    title: 'MacBook Pro M4 新品首发',
+    subtitle: 'M4 Pro芯片，性能怪兽，限时秒杀价',
+    btnText: '查看详情',
+    productId: 11
+  },
+  {
+    image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1400&h=400&fit=crop',
+    title: 'Sony WH-1000XM6',
+    subtitle: '业界顶级降噪，40小时续航，限时特价',
+    btnText: '立即购买',
+    productId: 6
+  },
+  {
+    image: 'https://images.unsplash.com/photo-1592107761705-30a1bbc641e7?w=1400&h=400&fit=crop',
+    title: 'Nintendo Switch 2',
+    subtitle: '8英寸OLED屏幕，4K输出，游戏新体验',
+    btnText: '抢购中',
+    productId: 7
+  }
+]);
+
+// 搜索相关状态
+const searchKeyword = ref('');
+const hotKeywords = ref(['iPhone 17', '手机', '笔记本', '耳机', '鞋子', '护肤', '运动', '食品']);
+
 // 验证码相关状态
 const showCaptchaModal = ref(false);
 const captchaImageUrl = ref('');
@@ -621,201 +741,839 @@ const categories = ref([
   { id: 3, name: '电脑办公', icon: '💻' },
   { id: 4, name: '家用电器', icon: '🏠' },
   { id: 5, name: '服装鞋包', icon: '👕' },
-  { id: 6, name: '美妆护肤', icon: '💄' }
+  { id: 6, name: '美妆护肤', icon: '💄' },
+  { id: 7, name: '运动户外', icon: '⚽' },
+  { id: 8, name: '食品饮料', icon: '🍎' }
 ]);
 
-// 扩展的商品数据
+// 品类关键词映射（用于搜索）
+const categoryKeywords = {
+  '手机': [2],
+  '手机数码': [2],
+  '数码': [2],
+  '智能手机': [2],
+  '电话': [2],
+  '电脑': [3],
+  '电脑办公': [3],
+  '笔记本': [3],
+  '笔记本电脑': [3],
+  '平板': [3],
+  '平板电脑': [3],
+  '家电': [4],
+  '家用电器': [4],
+  '电器': [4],
+  '家居': [4],
+  '服装': [5],
+  '服装鞋包': [5],
+  '衣服': [5],
+  '鞋子': [5],
+  '鞋': [5],
+  '运动鞋': [5],
+  '休闲鞋': [5],
+  '包包': [5],
+  '包': [5],
+  '美妆': [6],
+  '美妆护肤': [6],
+  '护肤': [6],
+  '化妆品': [6],
+  '彩妆': [6],
+  '运动': [7],
+  '运动户外': [7],
+  '户外': [7],
+  '健身': [7],
+  '食品': [8],
+  '食品饮料': [8],
+  '饮料': [8],
+  '零食': [8],
+  '耳机': [2],
+  '音响': [2, 4],
+  '键盘': [3],
+  '鼠标': [3],
+  '显示器': [3],
+  '显卡': [3],
+  '游戏': [2, 7],
+  '游戏机': [2],
+  '吸尘器': [4],
+  '扫地机': [4],
+  '空调': [4],
+  '冰箱': [4],
+  '洗衣机': [4],
+  '电视': [4],
+  '手表': [2],
+  '智能手表': [2],
+  '相机': [2],
+  '摄影': [2]
+};
+
+// 扩展的商品数据（全面更新和扩充）
 const extendedProducts = [
+  // ==================== 手机数码类 (category: 2) ====================
   {
     id: 1,
-    name: 'iPhone 15 Pro',
-    price: 7999.99,
-    originalPrice: 9999.99,
+    name: 'iPhone 17 Pro Max',
+    price: 9999.99,
+    originalPrice: 11999.99,
     stock: 100,
-    description: '钛金属设计，A17 Pro芯片，4800万像素主摄',
-    image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=iPhone%2015%20Pro%20titanium%20metal%20smartphone%20with%20triple%20camera%20system%20on%20white%20background%20professional%20product%20photography&image_size=square',
+    description: 'A19 Pro芯片，钛金属设计，4800万像素三摄，AI智能摄影',
+    image: 'https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=400&h=400&fit=crop',
     category: 2,
+    brand: 'Apple',
+    tags: ['手机', '智能手机', '苹果', 'iPhone', '旗舰'],
     specs: {
-      '屏幕': '6.1英寸 OLED',
-      '处理器': 'A17 Pro',
+      '屏幕': '6.9英寸 OLED',
+      '处理器': 'A19 Pro',
       '存储': '256GB',
       '颜色': '原色钛金属'
     }
   },
   {
     id: 2,
-    name: 'MacBook Pro 14',
-    price: 12999.99,
-    originalPrice: 14999.99,
-    stock: 50,
-    description: 'M3芯片，Liquid视网膜XDR显示屏，18小时续航',
-    image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=MacBook%20Pro%2014%20inch%20laptop%20with%20silver%20aluminum%20body%20open%20on%20white%20background%20professional%20product%20photography&image_size=square',
-    category: 3,
+    name: 'iPhone 17',
+    price: 6999.99,
+    originalPrice: 7999.99,
+    stock: 150,
+    description: 'A18芯片，全新设计语言，超视网膜显示屏',
+    image: 'https://images.unsplash.com/photo-1591337676887-a217a6970a8a?w=400&h=400&fit=crop',
+    category: 2,
+    brand: 'Apple',
+    tags: ['手机', '智能手机', '苹果', 'iPhone'],
     specs: {
-      '屏幕': '14.2英寸 XDR',
+      '屏幕': '6.1英寸 OLED',
+      '处理器': 'A18',
+      '存储': '128GB',
+      '颜色': '星光色'
+    }
+  },
+  {
+    id: 3,
+    name: 'Samsung Galaxy S25 Ultra',
+    price: 8999.99,
+    originalPrice: 9999.99,
+    stock: 80,
+    description: '骁龙8 Gen4，2亿像素主摄，S Pen手写笔，AI智能助手',
+    image: 'https://images.unsplash.com/photo-1610945415295-d9bbf067e59c?w=400&h=400&fit=crop',
+    category: 2,
+    brand: 'Samsung',
+    tags: ['手机', '智能手机', '三星', 'Galaxy', '旗舰'],
+    specs: {
+      '屏幕': '6.8英寸 AMOLED',
+      '处理器': '骁龙8 Gen4',
+      '存储': '512GB',
+      '相机': '2亿像素'
+    }
+  },
+  {
+    id: 4,
+    name: 'Xiaomi 15 Pro',
+    price: 4999.99,
+    originalPrice: 5999.99,
+    stock: 120,
+    description: '骁龙8 Gen4，徕卡影像，120W快充，IP68防水',
+    image: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&h=400&fit=crop',
+    category: 2,
+    brand: 'Xiaomi',
+    tags: ['手机', '智能手机', '小米', '徕卡'],
+    specs: {
+      '屏幕': '6.73英寸 AMOLED',
+      '处理器': '骁龙8 Gen4',
+      '存储': '256GB',
+      '快充': '120W'
+    }
+  },
+  {
+    id: 5,
+    name: 'AirPods Pro 3',
+    price: 1999.99,
+    originalPrice: 2499.99,
+    stock: 200,
+    description: 'H3芯片，主动降噪2.0，空间音频，自适应通透模式',
+    image: 'https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?w=400&h=400&fit=crop',
+    category: 2,
+    brand: 'Apple',
+    tags: ['耳机', '无线耳机', '降噪耳机', '苹果'],
+    specs: {
+      '芯片': 'H3',
+      '降噪': '主动降噪2.0',
+      '续航': '36小时',
+      '防水': 'IPX5'
+    }
+  },
+  {
+    id: 6,
+    name: 'Sony WH-1000XM6',
+    price: 2999.99,
+    originalPrice: 3499.99,
+    stock: 80,
+    description: '业界顶级降噪，40小时续航，Hi-Res认证，舒适佩戴',
+    image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=400&fit=crop',
+    category: 2,
+    brand: 'Sony',
+    tags: ['耳机', '头戴式耳机', '降噪耳机', '索尼'],
+    specs: {
+      '降噪': '顶级主动降噪',
+      '续航': '40小时',
+      '连接': '蓝牙5.3',
+      '重量': '248g'
+    }
+  },
+  {
+    id: 7,
+    name: 'Nintendo Switch 2',
+    price: 2999.99,
+    originalPrice: 3499.99,
+    stock: 60,
+    description: '8英寸OLED屏幕，4K输出，向下兼容，增强Joy-Con',
+    image: 'https://images.unsplash.com/photo-1592107761705-30a1bbc641e7?w=400&h=400&fit=crop',
+    category: 2,
+    brand: 'Nintendo',
+    tags: ['游戏机', '游戏', '掌机', '任天堂'],
+    specs: {
+      '屏幕': '8英寸 OLED',
+      '存储': '128GB',
+      '输出': '4K',
+      '续航': '12小时'
+    }
+  },
+  {
+    id: 8,
+    name: 'Sony PlayStation 5 Pro',
+    price: 4999.99,
+    originalPrice: 5499.99,
+    stock: 40,
+    description: '8K游戏支持，光追加速，2TB SSD，DualSense Edge手柄',
+    image: 'https://images.unsplash.com/photo-1606144042614-b2417e99c4e3?w=400&h=400&fit=crop',
+    category: 2,
+    brand: 'Sony',
+    tags: ['游戏机', '游戏', '主机', 'PS5', 'PlayStation'],
+    specs: {
+      '存储': '2TB SSD',
+      '输出': '8K',
+      '光追': '硬件加速',
+      '手柄': 'DualSense Edge'
+    }
+  },
+  {
+    id: 9,
+    name: 'Canon EOS R6 Mark III',
+    price: 18999.99,
+    originalPrice: 21999.99,
+    stock: 30,
+    description: '4500万像素，8K视频，机身防抖8档，双卡槽',
+    image: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=400&h=400&fit=crop',
+    category: 2,
+    brand: 'Canon',
+    tags: ['相机', '单反', '微单', '佳能', '摄影'],
+    specs: {
+      '像素': '4500万',
+      '视频': '8K 60fps',
+      '防抖': '8档',
+      '对焦': '全像素双核'
+    }
+  },
+  {
+    id: 10,
+    name: 'Apple Watch Ultra 3',
+    price: 6999.99,
+    originalPrice: 7999.99,
+    stock: 70,
+    description: '钛金属表壳，蓝宝石玻璃，100米防水，双频GPS',
+    image: 'https://images.unsplash.com/photo-1434493789847-2f02dc6ca35d?w=400&h=400&fit=crop',
+    category: 2,
+    brand: 'Apple',
+    tags: ['手表', '智能手表', '苹果', '运动'],
+    specs: {
+      '表壳': '钛金属',
+      '防水': '100米',
+      '续航': '72小时',
+      'GPS': '双频L1+L5'
+    }
+  },
+
+  // ==================== 电脑办公类 (category: 3) ====================
+  {
+    id: 11,
+    name: 'MacBook Pro 16 M4 Pro',
+    price: 19999.99,
+    originalPrice: 22999.99,
+    stock: 50,
+    description: 'M4 Pro芯片，Liquid视网膜XDR显示屏，24小时续航',
+    image: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=400&h=400&fit=crop',
+    category: 3,
+    brand: 'Apple',
+    tags: ['笔记本', '笔记本电脑', '苹果', 'MacBook', '电脑'],
+    specs: {
+      '屏幕': '16.2英寸 XDR',
+      '处理器': 'M4 Pro',
+      '内存': '32GB',
+      '存储': '1TB SSD'
+    }
+  },
+  {
+    id: 12,
+    name: 'MacBook Air 15 M3',
+    price: 10999.99,
+    originalPrice: 12999.99,
+    stock: 80,
+    description: 'M3芯片，15.3英寸Liquid视网膜屏，18小时续航',
+    image: 'https://images.unsplash.com/photo-1541807084-5c52b6b3adef?w=400&h=400&fit=crop',
+    category: 3,
+    brand: 'Apple',
+    tags: ['笔记本', '笔记本电脑', '苹果', 'MacBook', '电脑'],
+    specs: {
+      '屏幕': '15.3英寸',
       '处理器': 'M3',
       '内存': '16GB',
       '存储': '512GB SSD'
     }
   },
   {
-    id: 3,
-    name: 'AirPods Pro 2',
-    price: 1899.99,
-    originalPrice: 2299.99,
-    stock: 200,
-    description: '主动降噪，空间音频，自适应通透模式',
-    image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=AirPods%20Pro%202%20wireless%20earbuds%20with%20charging%20case%20on%20white%20background%20professional%20product%20photography&image_size=square',
-    category: 2,
+    id: 13,
+    name: 'Dell XPS 15',
+    price: 13999.99,
+    originalPrice: 16999.99,
+    stock: 45,
+    description: 'Intel酷睿Ultra 9，RTX 4070，4K OLED触控屏',
+    image: 'https://images.unsplash.com/photo-1593642632559-0c6d3fc62b89?w=400&h=400&fit=crop',
+    category: 3,
+    brand: 'Dell',
+    tags: ['笔记本', '笔记本电脑', '戴尔', '电脑', '游戏本'],
     specs: {
-      '芯片': 'H2',
-      '降噪': '主动降噪',
-      '续航': '30小时',
-      '防水': 'IPX4'
+      '屏幕': '15.6英寸 4K OLED',
+      '处理器': 'Intel Ultra 9',
+      '显卡': 'RTX 4070',
+      '存储': '1TB SSD'
     }
   },
   {
-    id: 4,
-    name: 'iPad Pro 12.9',
-    price: 8999.99,
-    originalPrice: 10999.99,
-    stock: 50,
-    description: 'M2芯片，Liquid视网膜XDR显示屏，支持Apple Pencil',
-    image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=iPad%20Pro%2012.9%20inch%20tablet%20with%20Apple%20Pencil%20on%20white%20background%20professional%20product%20photography&image_size=square',
+    id: 14,
+    name: 'iPad Pro 13 M4',
+    price: 9999.99,
+    originalPrice: 11999.99,
+    stock: 60,
+    description: 'M4芯片，Ultra Retina XDR显示屏，Apple Pencil Pro',
+    image: 'https://images.unsplash.com/photo-1544244015-0df4b3ffc6b0?w=400&h=400&fit=crop',
     category: 3,
+    brand: 'Apple',
+    tags: ['平板', '平板电脑', 'iPad', '苹果'],
     specs: {
-      '屏幕': '12.9英寸 XDR',
-      '处理器': 'M2',
+      '屏幕': '13英寸 Ultra Retina',
+      '处理器': 'M4',
       '存储': '256GB',
       '网络': 'WiFi + 5G'
     }
   },
   {
-    id: 5,
-    name: 'Sony WH-1000XM5',
-    price: 2499.99,
-    originalPrice: 2999.99,
-    stock: 80,
-    description: '业界领先的降噪，30小时续航，舒适佩戴',
-    image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Sony%20WH-1000XM5%20black%20over-ear%20headphones%20on%20white%20background%20professional%20product%20photography&image_size=square',
-    category: 2,
+    id: 15,
+    name: 'ASUS ROG 游戏显示器 32',
+    price: 5999.99,
+    originalPrice: 6999.99,
+    stock: 35,
+    description: '32英寸4K 240Hz OLED，0.03ms响应，G-Sync',
+    image: 'https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?w=400&h=400&fit=crop',
+    category: 3,
+    brand: 'ASUS',
+    tags: ['显示器', '游戏显示器', '电脑配件', '华硕'],
     specs: {
-      '降噪': '主动降噪',
-      '续航': '30小时',
-      '连接': '蓝牙5.2',
-      '重量': '250g'
+      '尺寸': '32英寸',
+      '分辨率': '4K',
+      '刷新率': '240Hz',
+      '面板': 'OLED'
     }
   },
   {
-    id: 6,
-    name: 'Nintendo Switch OLED',
-    price: 2199.99,
-    originalPrice: 2599.99,
-    stock: 60,
-    description: '7英寸OLED屏幕，64GB存储，增强音频',
-    image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Nintendo%20Switch%20OLED%20white%20handheld%20gaming%20console%20on%20white%20background%20professional%20product%20photography&image_size=square',
-    category: 2,
+    id: 16,
+    name: 'NVIDIA RTX 5090',
+    price: 14999.99,
+    originalPrice: 16999.99,
+    stock: 20,
+    description: '32GB GDDR7，DLSS 4.0，光追3.0，AI加速',
+    image: 'https://images.unsplash.com/photo-1591488320449-011701bb6704?w=400&h=400&fit=crop',
+    category: 3,
+    brand: 'NVIDIA',
+    tags: ['显卡', '电脑配件', '游戏', 'GPU'],
     specs: {
-      '屏幕': '7英寸 OLED',
-      '存储': '64GB',
-      '续航': '9小时',
-      '颜色': '白色'
+      '显存': '32GB GDDR7',
+      '架构': 'Blackwell',
+      'DLSS': '4.0',
+      '接口': 'PCIe 5.0'
     }
   },
   {
-    id: 7,
-    name: 'Dyson V15 Detect',
-    price: 4599.99,
-    originalPrice: 5499.99,
-    stock: 40,
-    description: '激光探测，智能吸力调节，60分钟续航',
-    image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Dyson%20V15%20Detect%20cordless%20vacuum%20cleaner%20on%20white%20background%20professional%20product%20photography&image_size=square',
-    category: 4,
-    specs: {
-      '吸力': '230AW',
-      '续航': '60分钟',
-      '重量': '3kg',
-      '尘杯': '0.77L'
-    }
-  },
-  {
-    id: 8,
-    name: 'Nike Air Max 270',
+    id: 17,
+    name: 'Logitech MX Master 4',
     price: 899.99,
-    originalPrice: 1299.99,
+    originalPrice: 1099.99,
     stock: 150,
-    description: '大气垫缓震，透气网面，时尚设计',
-    image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Nike%20Air%20Max%20270%20sneakers%20with%20visible%20air%20cushion%20on%20white%20background%20professional%20product%20photography&image_size=square',
-    category: 5,
+    description: '人体工学设计，8000 DPI，多设备切换，静音点击',
+    image: 'https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=400&h=400&fit=crop',
+    category: 3,
+    brand: 'Logitech',
+    tags: ['鼠标', '电脑配件', '办公', '罗技'],
     specs: {
-      '鞋面': '网眼布',
+      'DPI': '8000',
+      '连接': '蓝牙/2.4G',
+      '续航': '70天',
+      '按键': '8个'
+    }
+  },
+  {
+    id: 18,
+    name: 'Keychron Q1 Pro',
+    price: 1299.99,
+    originalPrice: 1599.99,
+    stock: 100,
+    description: 'QMK/VIA支持，Gasket结构，热插拔轴体，RGB背光',
+    image: 'https://images.unsplash.com/photo-1595225476474-87563907a212?w=400&h=400&fit=crop',
+    category: 3,
+    brand: 'Keychron',
+    tags: ['键盘', '机械键盘', '电脑配件', '办公'],
+    specs: {
+      '轴体': '热插拔',
+      '连接': '蓝牙/有线',
+      '背光': 'RGB',
+      '结构': 'Gasket'
+    }
+  },
+
+  // ==================== 家用电器类 (category: 4) ====================
+  {
+    id: 19,
+    name: 'Dyson V16 Detect',
+    price: 5499.99,
+    originalPrice: 6499.99,
+    stock: 50,
+    description: '激光探测灰尘，智能吸力调节，70分钟续航',
+    image: 'https://images.unsplash.com/photo-1558317374-067fb5f30001?w=400&h=400&fit=crop',
+    category: 4,
+    brand: 'Dyson',
+    tags: ['吸尘器', '家电', '戴森', '清洁'],
+    specs: {
+      '吸力': '262AW',
+      '续航': '70分钟',
+      '重量': '2.9kg',
+      '尘杯': '0.76L'
+    }
+  },
+  {
+    id: 20,
+    name: 'Roborock S8 Pro Ultra',
+    price: 5999.99,
+    originalPrice: 6999.99,
+    stock: 40,
+    description: 'AI避障，自动集尘，自动洗拖布，60°C热水洗',
+    image: 'https://images.unsplash.com/photo-1589894404892-7310b9b71f7b?w=400&h=400&fit=crop',
+    category: 4,
+    brand: 'Roborock',
+    tags: ['扫地机', '扫地机器人', '家电', '清洁'],
+    specs: {
+      '吸力': '6000Pa',
+      '导航': 'LDS+AI',
+      '续航': '180分钟',
+      '水箱': '250ml'
+    }
+  },
+  {
+    id: 21,
+    name: 'DJI Mini 5 Pro',
+    price: 6999.99,
+    originalPrice: 7999.99,
+    stock: 35,
+    description: '4K/120fps，48MP照片，47分钟续航，全向避障',
+    image: 'https://images.unsplash.com/photo-1473968512647-3e447244af8f?w=400&h=400&fit=crop',
+    category: 4,
+    brand: 'DJI',
+    tags: ['无人机', '航拍', '大疆', '摄影'],
+    specs: {
+      '重量': '249g',
+      '视频': '4K/120fps',
+      '续航': '47分钟',
+      '避障': '全向'
+    }
+  },
+  {
+    id: 22,
+    name: 'Midea 智能空调 3匹',
+    price: 7999.99,
+    originalPrice: 9999.99,
+    stock: 25,
+    description: '新一级能效，AI智能控温，自清洁，静音设计',
+    image: 'https://images.unsplash.com/photo-1631567091046-3b31a31d1f76?w=400&h=400&fit=crop',
+    category: 4,
+    brand: 'Midea',
+    tags: ['空调', '家电', '美的', '制冷'],
+    specs: {
+      '功率': '3匹',
+      '能效': '新一级',
+      '噪音': '18dB',
+      '功能': 'AI控温'
+    }
+  },
+  {
+    id: 23,
+    name: 'Samsung 65寸 Neo QLED电视',
+    price: 12999.99,
+    originalPrice: 15999.99,
+    stock: 20,
+    description: '8K分辨率，Mini LED背光，AI画质增强，120Hz',
+    image: 'https://images.unsplash.com/photo-1593359677879-a4bb92f829d1?w=400&h=400&fit=crop',
+    category: 4,
+    brand: 'Samsung',
+    tags: ['电视', '家电', '三星', '智能电视'],
+    specs: {
+      '尺寸': '65英寸',
+      '分辨率': '8K',
+      '刷新率': '120Hz',
+      '背光': 'Mini LED'
+    }
+  },
+
+  // ==================== 服装鞋包类 (category: 5) ====================
+  {
+    id: 24,
+    name: 'Nike Air Max 2026',
+    price: 1299.99,
+    originalPrice: 1699.99,
+    stock: 200,
+    description: '全新Air缓震科技，Flyknit鞋面，透气舒适',
+    image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&h=400&fit=crop',
+    category: 5,
+    brand: 'Nike',
+    tags: ['鞋子', '运动鞋', '耐克', '休闲鞋'],
+    specs: {
+      '鞋面': 'Flyknit',
       '中底': 'Air Max',
       '闭合': '系带',
       '适用': '跑步/休闲'
     }
   },
   {
-    id: 9,
-    name: 'SK-II 神仙水',
-    price: 1299.99,
-    originalPrice: 1699.99,
-    stock: 70,
-    description: 'Pitera精华，改善肤质，提亮肤色',
-    image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=SK-II%20Facial%20Treatment%20Essence%20bottle%20on%20white%20background%20professional%20product%20photography&image_size=square',
-    category: 6,
+    id: 25,
+    name: 'Adidas Ultraboost 24',
+    price: 1499.99,
+    originalPrice: 1899.99,
+    stock: 180,
+    description: 'Boost中底，Primeknit鞋面，Continental橡胶大底',
+    image: 'https://images.unsplash.com/photo-1608231387042-66d1773070a5?w=400&h=400&fit=crop',
+    category: 5,
+    brand: 'Adidas',
+    tags: ['鞋子', '运动鞋', '阿迪达斯', '跑步鞋'],
     specs: {
-      '容量': '230ml',
+      '鞋面': 'Primeknit',
+      '中底': 'Boost',
+      '大底': 'Continental',
+      '重量': '310g'
+    }
+  },
+  {
+    id: 26,
+    name: 'New Balance 990v6',
+    price: 1599.99,
+    originalPrice: 1999.99,
+    stock: 120,
+    description: '美产经典，ENCAP中底，猪巴革鞋面，复古设计',
+    image: 'https://images.unsplash.com/photo-1539185441755-769473a23570?w=400&h=400&fit=crop',
+    category: 5,
+    brand: 'New Balance',
+    tags: ['鞋子', '运动鞋', '休闲鞋', '复古'],
+    specs: {
+      '鞋面': '猪巴革/网布',
+      '中底': 'ENCAP',
+      '产地': '美国',
+      '风格': '复古'
+    }
+  },
+  {
+    id: 27,
+    name: 'Louis Vuitton Neverfull MM',
+    price: 15999.99,
+    originalPrice: 18999.99,
+    stock: 15,
+    description: '经典老花帆布，植鞣牛皮手柄，大容量设计',
+    image: 'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=400&h=400&fit=crop',
+    category: 5,
+    brand: 'Louis Vuitton',
+    tags: ['包包', '手提包', '奢侈品', 'LV'],
+    specs: {
+      '材质': '老花帆布',
+      '手柄': '植鞣牛皮',
+      '尺寸': '31x28x14cm',
+      '内衬': '条纹帆布'
+    }
+  },
+  {
+    id: 28,
+    name: 'Canada Goose 远征派克大衣',
+    price: 9999.99,
+    originalPrice: 12999.99,
+    stock: 30,
+    description: '625蓬白鸭绒，防风防水，-30°C保暖',
+    image: 'https://images.unsplash.com/photo-1539533018447-63fcce2678e3?w=400&h=400&fit=crop',
+    category: 5,
+    brand: 'Canada Goose',
+    tags: ['衣服', '羽绒服', '大衣', '加拿大鹅'],
+    specs: {
+      '填充': '625蓬白鸭绒',
+      '面料': 'Arctic Tech',
+      '温度': '-30°C',
+      '毛领': '郊狼毛'
+    }
+  },
+  {
+    id: 29,
+    name: 'Uniqlo U系列羽绒服',
+    price: 799.99,
+    originalPrice: 999.99,
+    stock: 300,
+    description: '轻薄保暖，便携收纳，90%白鸭绒',
+    image: 'https://images.unsplash.com/photo-1591047139829-d91aecb6caea?w=400&h=400&fit=crop',
+    category: 5,
+    brand: 'Uniqlo',
+    tags: ['衣服', '羽绒服', '优衣库', '休闲'],
+    specs: {
+      '填充': '90%白鸭绒',
+      '面料': '尼龙',
+      '特点': '便携收纳',
+      '风格': '简约'
+    }
+  },
+
+  // ==================== 美妆护肤类 (category: 6) ====================
+  {
+    id: 30,
+    name: 'SK-II 神仙水 330ml',
+    price: 1799.99,
+    originalPrice: 2199.99,
+    stock: 100,
+    description: 'Pitera精华，改善肤质，提亮肤色，深层保湿',
+    image: 'https://images.unsplash.com/photo-1571781926291-c477ebfd024b?w=400&h=400&fit=crop',
+    category: 6,
+    brand: 'SK-II',
+    tags: ['护肤', '精华', '化妆水', '化妆品'],
+    specs: {
+      '容量': '330ml',
       '成分': 'Pitera',
       '功效': '保湿/提亮',
       '适用': '所有肤质'
     }
   },
   {
-    id: 10,
-    name: 'Samsung Galaxy S24',
-    price: 5999.99,
-    originalPrice: 6999.99,
-    stock: 90,
-    description: 'AI智能手机，超视觉影像，钛金属边框',
-    image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Samsung%20Galaxy%20S24%20smartphone%20with%20titanium%20frame%20on%20white%20background%20professional%20product%20photography&image_size=square',
-    category: 2,
+    id: 31,
+    name: 'La Mer 海蓝之谜面霜',
+    price: 3299.99,
+    originalPrice: 3899.99,
+    stock: 50,
+    description: '深海神奇活性精萃，修护肌肤，奢华滋养',
+    image: 'https://images.unsplash.com/photo-1608248597279-f99d06bf9dd2?w=400&h=400&fit=crop',
+    category: 6,
+    brand: 'La Mer',
+    tags: ['护肤', '面霜', '奢侈品', '化妆品'],
     specs: {
-      '屏幕': '6.2英寸 AMOLED',
-      '处理器': '骁龙8 Gen3',
-      '存储': '256GB',
-      '相机': '5000万像素'
+      '容量': '60ml',
+      '成分': '深海精萃',
+      '功效': '修护/滋养',
+      '适用': '干性/熟龄肌'
     }
   },
   {
-    id: 11,
-    name: 'Lego 兰博基尼',
+    id: 32,
+    name: 'Estée Lauder 小棕瓶精华',
+    price: 899.99,
+    originalPrice: 1099.99,
+    stock: 150,
+    description: '二裂酵母，夜间修护，抗初老，淡化细纹',
+    image: 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?w=400&h=400&fit=crop',
+    category: 6,
+    brand: 'Estée Lauder',
+    tags: ['护肤', '精华', '抗衰老', '化妆品'],
+    specs: {
+      '容量': '50ml',
+      '成分': '二裂酵母',
+      '功效': '修护/抗老',
+      '适用': '所有肤质'
+    }
+  },
+  {
+    id: 33,
+    name: 'Dior 迪奥999口红',
+    price: 399.99,
+    originalPrice: 499.99,
+    stock: 200,
+    description: '经典正红色，丝绒质地，持久显色',
+    image: 'https://images.unsplash.com/photo-1586495777744-4413f21062fa?w=400&h=400&fit=crop',
+    category: 6,
+    brand: 'Dior',
+    tags: ['彩妆', '口红', '迪奥', '化妆品'],
+    specs: {
+      '色号': '999',
+      '质地': '丝绒',
+      '显色': '高显色',
+      '持久': '持久'
+    }
+  },
+  {
+    id: 34,
+    name: 'CHANEL 香奈儿5号香水',
+    price: 1299.99,
+    originalPrice: 1599.99,
+    stock: 80,
+    description: '经典花香调，优雅迷人，持久留香',
+    image: 'https://images.unsplash.com/photo-1541643600914-78b084683601?w=400&h=400&fit=crop',
+    category: 6,
+    brand: 'CHANEL',
+    tags: ['香水', '香奈儿', '奢侈品', '化妆品'],
+    specs: {
+      '容量': '100ml',
+      '香调': '花香调',
+      '浓度': 'EDP',
+      '留香': '8-10小时'
+    }
+  },
+
+  // ==================== 运动户外类 (category: 7) ====================
+  {
+    id: 35,
+    name: 'Lululemon Align瑜伽裤',
+    price: 899.99,
+    originalPrice: 1099.99,
+    stock: 150,
+    description: 'Nulu面料，裸感体验，高腰设计，透气速干',
+    image: 'https://images.unsplash.com/photo-1506629082955-511b1aa562c8?w=400&h=400&fit=crop',
+    category: 7,
+    brand: 'Lululemon',
+    tags: ['运动', '瑜伽', '健身', '瑜伽裤'],
+    specs: {
+      '面料': 'Nulu',
+      '特点': '裸感',
+      '腰型': '高腰',
+      '功能': '透气速干'
+    }
+  },
+  {
+    id: 36,
+    name: 'Garmin Fenix 8',
+    price: 6999.99,
+    originalPrice: 7999.99,
+    stock: 40,
+    description: '专业户外手表，GPS导航，心率血氧，太阳能充电',
+    image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&h=400&fit=crop',
+    category: 7,
+    brand: 'Garmin',
+    tags: ['运动', '手表', '户外', '健身'],
+    specs: {
+      '防水': '100米',
+      '续航': '37天',
+      'GPS': '多频多星',
+      '功能': '心率/血氧/导航'
+    }
+  },
+  {
+    id: 37,
+    name: 'The North Face 冲锋衣',
     price: 2499.99,
-    originalPrice: 3299.99,
-    stock: 30,
-    description: '1:8比例，3696颗粒，V12发动机',
-    image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Lego%20Lamborghini%20model%20car%20kit%20on%20white%20background%20professional%20product%20photography&image_size=square',
-    category: 4,
+    originalPrice: 2999.99,
+    stock: 80,
+    description: 'Gore-Tex面料，防风防水，透气舒适，专业户外',
+    image: 'https://images.unsplash.com/photo-1544923246-77307dd628b8?w=400&h=400&fit=crop',
+    category: 7,
+    brand: 'The North Face',
+    tags: ['运动', '户外', '冲锋衣', '衣服'],
     specs: {
-      '颗粒': '3696',
-      '比例': '1:8',
-      '尺寸': '60x25x13cm',
-      '年龄': '18+'
+      '面料': 'Gore-Tex',
+      '防水': '10000mm',
+      '透气': '透气膜',
+      '适用': '登山/徒步'
     }
   },
   {
-    id: 12,
-    name: 'Adidas Yeezy Boost',
-    price: 1899.99,
-    originalPrice: 2499.99,
-    stock: 45,
-    description: 'Boost缓震，Primeknit鞋面，潮流设计',
-    image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Adidas%20Yeezy%20Boost%20sneakers%20with%20Primeknit%20upper%20on%20white%20background%20professional%20product%20photography&image_size=square',
-    category: 5,
+    id: 38,
+    name: 'Yeti 保温杯 36oz',
+    price: 399.99,
+    originalPrice: 499.99,
+    stock: 200,
+    description: '18/8不锈钢，真空保温，防漏设计，户外必备',
+    image: 'https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=400&h=400&fit=crop',
+    category: 7,
+    brand: 'Yeti',
+    tags: ['运动', '户外', '保温杯', '水杯'],
     specs: {
-      '鞋面': 'Primeknit',
-      '中底': 'Boost',
-      '闭合': '系带',
-      '风格': '潮流'
+      '容量': '36oz/1L',
+      '材质': '18/8不锈钢',
+      '保温': '24小时',
+      '特点': '防漏'
+    }
+  },
+
+  // ==================== 食品饮料类 (category: 8) ====================
+  {
+    id: 39,
+    name: '星巴克精选咖啡豆 250g',
+    price: 128.99,
+    originalPrice: 158.99,
+    stock: 500,
+    description: '阿拉比卡咖啡豆，中度烘焙，香气浓郁',
+    image: 'https://images.unsplash.com/photo-1559056199-641a0ac8b55e?w=400&h=400&fit=crop',
+    category: 8,
+    brand: 'Starbucks',
+    tags: ['食品', '咖啡', '饮料', '零食'],
+    specs: {
+      '重量': '250g',
+      '产地': '拉丁美洲',
+      '烘焙': '中度',
+      '风味': '坚果/巧克力'
+    }
+  },
+  {
+    id: 40,
+    name: '三只松鼠坚果礼盒',
+    price: 199.99,
+    originalPrice: 259.99,
+    stock: 300,
+    description: '精选坚果组合，每日坚果，营养健康',
+    image: 'https://images.unsplash.com/photo-1536816579748-4ecb3f03d72a?w=400&h=400&fit=crop',
+    category: 8,
+    brand: '三只松鼠',
+    tags: ['食品', '坚果', '零食', '礼盒'],
+    specs: {
+      '规格': '30包/盒',
+      '内容': '核桃/腰果/杏仁等',
+      '保质期': '12个月',
+      '特点': '独立包装'
+    }
+  },
+  {
+    id: 41,
+    name: '农夫山泉矿泉水 24瓶',
+    price: 49.99,
+    originalPrice: 59.99,
+    stock: 1000,
+    description: '天然矿泉水，深层水源，矿物质丰富',
+    image: 'https://images.unsplash.com/photo-1548839140-29a749e1cf4d?w=400&h=400&fit=crop',
+    category: 8,
+    brand: '农夫山泉',
+    tags: ['饮料', '矿泉水', '水', '食品'],
+    specs: {
+      '规格': '550ml x 24瓶',
+      '水源': '深层地下水',
+      'pH值': '7.3±0.5',
+      '特点': '天然矿物质'
+    }
+  },
+  {
+    id: 42,
+    name: '茅台飞天53度 500ml',
+    price: 2999.99,
+    originalPrice: 3499.99,
+    stock: 50,
+    description: '酱香型白酒，国酒经典，收藏送礼佳品',
+    image: 'https://images.unsplash.com/photo-1607622750671-6cd9a99eabd1?w=400&h=400&fit=crop',
+    category: 8,
+    brand: '茅台',
+    tags: ['饮料', '白酒', '酒', '礼品'],
+    specs: {
+      '度数': '53度',
+      '容量': '500ml',
+      '香型': '酱香型',
+      '产地': '贵州茅台镇'
     }
   }
 ];
@@ -829,6 +1587,101 @@ const totalStock = computed(() => {
 const cartTotal = computed(() => {
   return cart.value.reduce((sum, item) => sum + item.price, 0);
 });
+
+// 搜索过滤后的商品
+const filteredProducts = computed(() => {
+  if (!searchKeyword.value.trim()) {
+    return products.value;
+  }
+  const keyword = searchKeyword.value.toLowerCase().trim();
+  
+  // 检查是否匹配品类关键词
+  const matchedCategoryIds = categoryKeywords[keyword] || [];
+  
+  return products.value.filter(product => {
+    // 品类匹配
+    if (matchedCategoryIds.length > 0 && matchedCategoryIds.includes(product.category)) {
+      return true;
+    }
+    
+    // 商品名称匹配
+    if (product.name.toLowerCase().includes(keyword)) {
+      return true;
+    }
+    
+    // 描述匹配
+    if (product.description.toLowerCase().includes(keyword)) {
+      return true;
+    }
+    
+    // 品牌匹配
+    if (product.brand && product.brand.toLowerCase().includes(keyword)) {
+      return true;
+    }
+    
+    // 标签匹配
+    if (product.tags && product.tags.some(tag => tag.toLowerCase().includes(keyword))) {
+      return true;
+    }
+    
+    // 规格匹配
+    if (product.specs && Object.values(product.specs).some(v => 
+      String(v).toLowerCase().includes(keyword)
+    )) {
+      return true;
+    }
+    
+    return false;
+  });
+});
+
+// 轮播控制方法
+const nextSlide = () => {
+  currentSlide.value = (currentSlide.value + 1) % carouselSlides.value.length;
+};
+
+const prevSlide = () => {
+  currentSlide.value = (currentSlide.value - 1 + carouselSlides.value.length) % carouselSlides.value.length;
+};
+
+const goToSlide = (index) => {
+  currentSlide.value = index;
+};
+
+const startCarouselAutoplay = () => {
+  stopCarouselAutoplay();
+  carouselInterval.value = setInterval(() => {
+    nextSlide();
+  }, 5000);
+};
+
+const stopCarouselAutoplay = () => {
+  if (carouselInterval.value) {
+    clearInterval(carouselInterval.value);
+    carouselInterval.value = null;
+  }
+};
+
+const handleSlideClick = (slide) => {
+  if (slide.productId) {
+    const product = products.value.find(p => p.id === slide.productId);
+    if (product) {
+      showProductDetail(product);
+    }
+  }
+};
+
+// 搜索方法
+const handleSearch = () => {
+  if (searchKeyword.value.trim()) {
+    showToastMessage(`搜索: ${searchKeyword.value}`, 'info');
+  }
+};
+
+const searchByKeyword = (keyword) => {
+  searchKeyword.value = keyword;
+  handleSearch();
+};
 
 // 格式化数字为两位数
 const formatNumber = (num) => {
@@ -899,9 +1752,9 @@ const fetchProducts = async () => {
   }
 };
 
-// 排序商品
+// 排序商品（已移至上方的computed定义，此处保留分类过滤逻辑）
 const sortedProducts = computed(() => {
-  let result = [...products.value];
+  let result = [...filteredProducts.value];
   
   if (activeCategory.value !== 1) {
     result = result.filter(p => p.category === activeCategory.value);
@@ -984,13 +1837,20 @@ const handleSeckill = async (productId) => {
 // 获取验证码
 const fetchCaptcha = async () => {
   try {
-    // 模拟验证码请求
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // 使用相对路径，通过Vite代理转发到后端
+    const response = await axios.get('/api/captcha', {
+      responseType: 'blob',
+      headers: {
+        'Cache-Control': 'no-cache'
+      }
+    });
     
-    // 生成随机验证码图片 URL
-    const randomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
-    captchaId.value = Date.now().toString();
-    captchaImageUrl.value = `https://placehold.co/200x60/667eea/ffffff?text=${randomCode}`;
+    // 从响应头获取验证码ID
+    captchaId.value = response.headers['x-captcha-id'] || '';
+    
+    // 将blob转换为图片URL
+    const blob = new Blob([response.data], { type: 'image/png' });
+    captchaImageUrl.value = URL.createObjectURL(blob);
   } catch (e) {
     console.error('获取验证码失败', e);
     showToastMessage('获取验证码失败', 'error');
@@ -1002,32 +1862,45 @@ const fetchCaptcha = async () => {
 // 提交秒杀请求
 const submitSeckill = async (productId, product) => {
   if (seckilling[productId]) return;
-  
+
   seckilling[productId] = true;
-  
+
   try {
     const token = localStorage.getItem('token');
     if (!token) {
       throw new Error('未登录');
     }
-    
+
     if (!product) {
       throw new Error('商品信息错误');
     }
-    
-    // 模拟秒杀请求，避免真实请求导致的服务器错误
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // 模拟秒杀成功
+
+    // 调用后端秒杀API
+    const response = await axios.post('http://localhost:8081/api/product/seckill', {
+      productId: productId,
+      captchaId: captchaId.value,
+      captchaStr: captchaInput.value
+    }, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    // 秒杀成功
     product.stock--;
-    
+
     showCaptchaModal.value = false;
     successProductName.value = product.name;
     showSuccessModal.value = true;
-    showToastMessage('秒杀成功！', 'success');
+    showToastMessage('秒杀成功！订单已创建', 'success');
+
+    // 刷新商品列表以获取最新库存
+    await fetchProducts();
   } catch (err) {
     console.error('秒杀失败:', err);
     showToastMessage(err.response?.data?.error || err.message || '秒杀失败，请重试', 'error');
+    // 刷新验证码
+    await fetchCaptcha();
   } finally {
     seckilling[productId] = false;
     showCaptchaModal.value = false;
@@ -1244,7 +2117,13 @@ onMounted(async () => {
     countdown.value = calculateCountdown();
   }, 1000);
 
-  const cleanup = () => clearInterval(timer);
+  // 启动轮播自动播放
+  startCarouselAutoplay();
+
+  const cleanup = () => {
+    clearInterval(timer);
+    stopCarouselAutoplay();
+  };
   window.addEventListener('beforeunload', cleanup);
 
   // 在组件卸载时清理
@@ -1274,6 +2153,235 @@ onMounted(async () => {
   max-width: 1400px;
   margin: 0 auto;
   padding: 0 24px;
+}
+
+/* 图片轮播区域 */
+.carousel-section {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  padding: 0;
+}
+
+.carousel-container {
+  position: relative;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  overflow: hidden;
+}
+
+.carousel-wrapper {
+  width: 100%;
+  overflow: hidden;
+}
+
+.carousel-track {
+  display: flex;
+  transition: transform 0.5s ease-in-out;
+}
+
+.carousel-slide {
+  min-width: 100%;
+  position: relative;
+  height: 400px;
+}
+
+.slide-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.slide-content {
+  position: absolute;
+  top: 50%;
+  left: 60px;
+  transform: translateY(-50%);
+  color: white;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  z-index: 2;
+}
+
+.slide-title {
+  font-size: 42px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  background: linear-gradient(90deg, #fff, #f0f0f0);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.slide-subtitle {
+  font-size: 18px;
+  margin-bottom: 24px;
+  opacity: 0.9;
+}
+
+.slide-btn {
+  padding: 14px 32px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 30px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.slide-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+}
+
+.carousel-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  z-index: 10;
+}
+
+.carousel-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-50%) scale(1.1);
+}
+
+.carousel-btn.prev {
+  left: 20px;
+}
+
+.carousel-btn.next {
+  right: 20px;
+}
+
+.carousel-indicators {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  z-index: 10;
+}
+
+.indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.indicator.active {
+  background: white;
+  width: 32px;
+  border-radius: 6px;
+}
+
+/* 搜索栏区域 */
+.search-section {
+  background: white;
+  padding: 24px 0;
+  border-bottom: 1px solid #eee;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.search-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  background: #f5f5f5;
+  border-radius: 30px;
+  padding: 4px;
+  border: 2px solid transparent;
+  transition: all 0.3s ease;
+}
+
+.search-box:focus-within {
+  border-color: #667eea;
+  background: white;
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+}
+
+.search-icon {
+  margin-left: 16px;
+  color: #999;
+}
+
+.search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 12px 16px;
+  font-size: 15px;
+  outline: none;
+}
+
+.search-input::placeholder {
+  color: #999;
+}
+
+.search-btn {
+  padding: 12px 28px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 24px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.search-btn:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.hot-keywords {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hot-label {
+  font-size: 13px;
+  color: #999;
+}
+
+.keyword-tag {
+  padding: 6px 14px;
+  background: #f0f0f0;
+  border-radius: 16px;
+  font-size: 13px;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.keyword-tag:hover {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
 }
 
 /* 秒杀活动横幅 */

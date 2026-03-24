@@ -59,8 +59,8 @@ func Login(user model.User) (uint, error) {
 	// 检查用户密码
 	isValid, err := db.CheckUserPassword(user.Phone, user.Password)
 	if err != nil {
-		if err.Error() == "用户不存在" {
-			utils.Logger.Warn("用户不存在", zap.String("phone", user.Phone))
+		if err.Error() == "用户不存在" || err.Error() == "密码错误" {
+			utils.Logger.Warn("用户不存在或密码错误", zap.String("phone", user.Phone))
 			return 0, ErrUserLogin
 		}
 		utils.Logger.Error("检查用户密码失败", zap.String("phone", user.Phone), zap.Error(err))
@@ -107,4 +107,60 @@ func UpdateUserInfo(user *model.User) error {
 // DeleteUserByID 删除用户
 func DeleteUserByID(id uint) error {
 	return db.DeleteUser(id)
+}
+
+// InitDefaultAdminUser 初始化默认管理员用户
+func InitDefaultAdminUser() error {
+	// 检查管理员用户是否已存在
+	adminPhone := "admin"
+	existingID, err := db.CheckUserPhone(adminPhone)
+	if err == nil && existingID > 0 {
+		utils.Logger.Info("管理员用户已存在，跳过创建")
+		return nil
+	}
+
+	// 创建管理员用户
+	adminUser := model.User{
+		Username: "admin",
+		Phone:    "admin",
+		Password: "admin123",
+	}
+
+	// 加密密码
+	hashed, err := bcrypt.GenerateFromPassword([]byte(adminUser.Password), bcrypt.DefaultCost)
+	if err != nil {
+		utils.Logger.Error("加密管理员密码失败", zap.Error(err))
+		return err
+	}
+	adminUser.Password = string(hashed)
+
+	// 创建用户到数据库
+	userID, err := db.CreateUser(&adminUser)
+	if err != nil {
+		utils.Logger.Error("创建管理员用户失败", zap.Error(err))
+		return err
+	}
+
+	utils.Logger.Info("管理员用户创建成功",
+		zap.String("username", adminUser.Username),
+		zap.Uint("id", userID))
+
+	// 为管理员用户分配管理员角色
+	adminRole, err := GetRoleByName("管理员")
+	if err != nil {
+		utils.Logger.Warn("获取管理员角色失败，跳过角色分配", zap.Error(err))
+		return nil
+	}
+
+	if err := AssignRoleToUser(userID, adminRole.ID); err != nil {
+		utils.Logger.Warn("为管理员用户分配角色失败", zap.Error(err))
+		return nil
+	}
+
+	utils.Logger.Info("管理员角色分配成功",
+		zap.String("username", adminUser.Username),
+		zap.Uint("user_id", userID),
+		zap.Uint("role_id", adminRole.ID))
+
+	return nil
 }

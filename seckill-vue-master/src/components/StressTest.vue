@@ -794,6 +794,18 @@ const startTest = async () => {
   addLog('info', `开始性能测试 - 并发用户: ${config.concurrentUsers}, 库存: ${config.stock}`);
   
   try {
+    addLog('info', `正在清理测试数据...`);
+    await axios.post('/api/product/clear-test-data', {}, {
+      headers: token ? {
+        'Authorization': `Bearer ${token}`
+      } : {}
+    });
+    addLog('success', `测试数据已清理`);
+  } catch (error) {
+    addLog('warning', `清理测试数据失败: ${error.response?.data?.error || error.message}，继续测试`);
+  }
+
+  try {
     addLog('info', `正在重置商品 ${config.productId} 的库存为 ${config.stock}...`);
     await axios.post('/api/product/reset-stock', {
       productId: config.productId,
@@ -913,9 +925,13 @@ const toggleResourceInfo = (key) => {
 
 const runConcurrentTest = async () => {
   const workers = [];
-  const requestsPerWorker = Math.ceil(config.concurrentUsers / 10);
+  // 根据并发用户数动态调整worker数量，最多20个worker
+  const workerCount = Math.min(Math.ceil(config.concurrentUsers / 10), 20);
+  const requestsPerWorker = Math.ceil(config.concurrentUsers / workerCount);
   
-  for (let i = 0; i < 10; i++) {
+  addLog('info', `启动 ${workerCount} 个worker，每个worker处理 ${requestsPerWorker} 个请求`);
+  
+  for (let i = 0; i < workerCount; i++) {
     workers.push(runWorker(i, requestsPerWorker));
   }
   
@@ -935,13 +951,15 @@ const runWorker = async (workerId, requestCount) => {
     
     const currentRequestId = ++requestId;
     const startTime = Date.now();
+    // 生成唯一用户ID：workerId * 100000 + i，确保不同worker之间不会重复
+    const uniqueUserId = workerId * 100000 + i + 1;
     
     try {
       const response = await axios.post('/api/product/seckill', {
         productId: config.productId,
         captchaId: 'stress-test',
         captchaStr: '1234',
-        userId: workerId * 1000 + i
+        userId: uniqueUserId
       }, {
         headers: localStorage.getItem('token') ? {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -957,7 +975,7 @@ const runWorker = async (workerId, requestCount) => {
           realtimeStats.successCount++;
           testResults.value.push({
             requestId: currentRequestId,
-            userId: workerId * 1000 + i,
+            userId: uniqueUserId,
             success: true,
             responseTime,
             errorMessage: null,
@@ -966,15 +984,15 @@ const runWorker = async (workerId, requestCount) => {
           
           addLog('success', `Worker ${workerId}: 请求 ${currentRequestId} 成功 (${responseTime}ms)`);
         } else {
-          handleFailure(currentRequestId, workerId, i, responseTime, response.data.error || response.data.message || '未知错误');
+          handleFailure(currentRequestId, uniqueUserId, responseTime, response.data.error || response.data.message || '未知错误');
         }
       } else {
-        handleFailure(currentRequestId, workerId, i, responseTime, response.data.error || response.data.message || '未知错误');
+        handleFailure(currentRequestId, uniqueUserId, responseTime, response.data.error || response.data.message || '未知错误');
       }
     } catch (error) {
       const responseTime = Date.now() - startTime;
       const errorMsg = error.response?.data?.error || error.message;
-      handleFailure(currentRequestId, workerId, i, responseTime, errorMsg);
+      handleFailure(currentRequestId, uniqueUserId, responseTime, errorMsg);
     }
     
     realtimeStats.totalRequests++;
@@ -985,12 +1003,12 @@ const runWorker = async (workerId, requestCount) => {
   }
 };
 
-const handleFailure = (requestId, workerId, index, responseTime, errorMessage) => {
+const handleFailure = (requestId, userId, responseTime, errorMessage) => {
   realtimeStats.failCount++;
   
   testResults.value.push({
     requestId,
-    userId: workerId * 1000 + index,
+    userId: userId,
     success: false,
     responseTime,
     errorMessage,
@@ -998,15 +1016,15 @@ const handleFailure = (requestId, workerId, index, responseTime, errorMessage) =
   });
   
   let errorType = '其他错误';
-  if (errorMessage.includes('库存')) {
+  if (errorMessage && errorMessage.includes('库存')) {
     errorType = '库存不足';
-  } else if (errorMessage.includes('超时') || errorMessage.includes('timeout')) {
+  } else if (errorMessage && (errorMessage.includes('超时') || errorMessage.includes('timeout'))) {
     errorType = '请求超时';
-  } else if (errorMessage.includes('限流') || errorMessage.includes('rate')) {
+  } else if (errorMessage && (errorMessage.includes('限流') || errorMessage.includes('rate'))) {
     errorType = '限流拦截';
-  } else if (errorMessage.includes('500') || errorMessage.includes('server') || errorMessage.includes('服务器') || errorMessage.includes('内部')) {
+  } else if (errorMessage && (errorMessage.includes('500') || errorMessage.includes('server') || errorMessage.includes('服务器') || errorMessage.includes('内部'))) {
     errorType = '系统内部错误';
-  } else if (errorMessage.includes('秒杀')) {
+  } else if (errorMessage && errorMessage.includes('秒杀')) {
     errorType = '秒杀失败';
   }
   
@@ -1015,7 +1033,7 @@ const handleFailure = (requestId, workerId, index, responseTime, errorMessage) =
     errorStats.value[errorIndex].count++;
   }
   
-  addLog('error', `Worker ${workerId}: 请求 ${requestId} 失败 - ${errorMessage}`);
+  addLog('error', `用户 ${userId}: 请求 ${requestId} 失败 - ${errorMessage || '未知错误'}`);
 };
 
 const startStatsUpdate = () => {

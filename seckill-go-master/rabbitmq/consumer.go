@@ -2,7 +2,10 @@ package rabbitmq
 
 import (
 	"fmt"
+	"seckill_go/db"
+	"seckill_go/model"
 	"seckill_go/utils"
+	"strconv"
 	"strings"
 	"time"
 
@@ -217,13 +220,54 @@ func HandleOrderMessage(message []byte) error {
 		return fmt.Errorf("无效的消息格式: %s", msgStr)
 	}
 
-	userID := parts[0]
-	productID := parts[1]
+	userIDStr := parts[0]
+	productIDStr := parts[1]
 
-	utils.Logger.Info("处理订单消息", zap.String("userID", userID), zap.String("productID", productID))
+	userID, err := strconv.ParseUint(userIDStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("无效的用户ID: %s", userIDStr)
+	}
 
-	// 模拟订单创建
-	utils.Logger.Info("订单创建成功", zap.String("userID", userID), zap.String("productID", productID))
+	productID, err := strconv.ParseUint(productIDStr, 10, 64)
+	if err != nil {
+		return fmt.Errorf("无效的商品ID: %s", productIDStr)
+	}
+
+	utils.Logger.Info("处理订单消息",
+		zap.Uint64("userID", userID),
+		zap.Uint64("productID", productID))
+
+	// 查询商品信息获取价格
+	var product model.Product
+	if err := db.DB.First(&product, productID).Error; err != nil {
+		utils.Logger.Error("查询商品信息失败",
+			zap.Uint64("productID", productID),
+			zap.Error(err))
+		return fmt.Errorf("查询商品信息失败: %v", err)
+	}
+
+	// 创建订单
+	order := model.Order{
+		UserID:      uint(userID),
+		ProductID:   uint(productID),
+		OrderAmount: product.Price,
+		Status:      model.OrderStatusPending,
+		CreatedAt:   time.Now(),
+	}
+
+	if err := db.DB.Create(&order).Error; err != nil {
+		utils.Logger.Error("创建订单失败",
+			zap.Uint64("userID", userID),
+			zap.Uint64("productID", productID),
+			zap.Error(err))
+		return fmt.Errorf("创建订单失败: %v", err)
+	}
+
+	utils.Logger.Info("订单创建成功",
+		zap.Uint("orderID", order.ID),
+		zap.Uint64("userID", userID),
+		zap.Uint64("productID", productID),
+		zap.Float64("amount", product.Price))
 
 	return nil
 }

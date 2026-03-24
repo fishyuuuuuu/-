@@ -205,3 +205,18 @@ func ResetProductStockHandler(c *gin.Context) {
 		"stock":     req.Stock,
 	})
 }
+
+// ClearTestDataHandler 清理测试数据（用于重置测试环境）
+func ClearTestDataHandler(c *gin.Context) {
+	utils.Logger.Info("清理测试数据")
+
+	// 清空订单数据
+	service.ClearMockOrders()
+
+	// 清理Redis中的限流键
+	utils.ClearRateLimitCache()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "测试数据已清理",
+	})
+}

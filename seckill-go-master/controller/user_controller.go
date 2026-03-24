@@ -1,9 +1,7 @@
 package controller
 
 import (
-	"bytes"
 	"errors"
-	"io"
 	"net/http"
 	"seckill_go/model"
 	"seckill_go/service"
@@ -13,42 +11,69 @@ import (
 	"go.uber.org/zap"
 )
 
+// LoginRequest 登录请求结构
+type LoginRequest struct {
+	Username    string `json:"username"`
+	Phone       string `json:"phone"`
+	Password    string `json:"password"`
+	CaptchaID   string `json:"captcha_id"`
+	CaptchaCode string `json:"captcha_code"`
+}
+
+// RegisterRequest 注册请求结构
+type RegisterRequest struct {
+	Username    string `json:"username"`
+	Phone       string `json:"phone"`
+	Password    string `json:"password"`
+	CaptchaID   string `json:"captcha_id"`
+	CaptchaCode string `json:"captcha_code"`
+}
+
 // RegisterHandler 处理用户注册请求
 func RegisterHandler(c *gin.Context) {
 	utils.Logger.Info("处理用户注册请求")
-	var user model.User
-	// 尝试绑定并验证数据
-	if err := c.ShouldBindJSON(&user); err != nil {
-		// 记录错误详情和原始请求体
-		utils.Logger.Warn("注册请求数据无效",
-			zap.String("error", err.Error()),
-		)
-		// 记录注册失败审计日志
-		utils.AuditRegister(user.Username, false, c.ClientIP())
+
+	var req RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Logger.Warn("注册请求数据无效", zap.String("error", err.Error()))
+		utils.AuditRegister(req.Username, false, c.ClientIP())
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "无效的注册数据：" + err.Error(),
 		})
 		return
 	}
+
+	// 验证验证码
+	if !utils.VerifyCaptcha(req.CaptchaID, req.CaptchaCode) {
+		utils.Logger.Warn("验证码错误",
+			zap.String("captcha_id", req.CaptchaID),
+			zap.String("captcha_code", req.CaptchaCode))
+		utils.AuditRegister(req.Username, false, c.ClientIP())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码错误或已过期"})
+		return
+	}
+
+	user := model.User{
+		Username: req.Username,
+		Phone:    req.Phone,
+		Password: req.Password,
+	}
+
 	utils.Logger.Info("用户注册数据验证成功",
 		zap.String("username", user.Username),
 		zap.String("phone", user.Phone),
 	)
 	if err := service.Register(user); err != nil {
 		utils.Logger.Error("用户注册失败", zap.Error(err))
-		// 记录注册失败审计日志
 		utils.AuditRegister(user.Username, false, c.ClientIP())
 		switch {
 		case errors.Is(err, service.ErrUserExists):
-			// 用户已存在：返回 409 Conflict（资源冲突）
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		default:
-			// 其他错误（如数据库异常）：返回 500 服务器错误
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器内部错误"})
 		}
 		return
 	}
-	// 记录注册成功审计日志
 	utils.AuditRegister(user.Username, true, c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"message": "注册成功"})
 }
@@ -56,30 +81,32 @@ func RegisterHandler(c *gin.Context) {
 // LoginHandler 处理用户登录请求
 func LoginHandler(c *gin.Context) {
 	utils.Logger.Info("处理用户登录请求")
-	// 读取原始请求体（io.ReadAll 兼容 io.Reader 接口）
-	bodyBytes, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		utils.Logger.Error("读取请求体失败", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器内部错误"})
-		return
-	}
-	// 由于请求体只能读取一次，需将内容写回，避免后续操作读取失败
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-	var user model.User
-	// 尝试绑定并验证数据
-	if err := c.ShouldBindJSON(&user); err != nil {
-		// 记录错误详情和原始请求体
-		utils.Logger.Warn("登录请求数据无效",
-			zap.String("error", err.Error()),
-			zap.String("request_body", string(bodyBytes)), // 使用读取到的请求体
-		)
-		// 记录登录失败审计日志
-		utils.AuditLogin(user.Username, false, c.ClientIP())
+
+	var req LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Logger.Warn("登录请求数据无效", zap.String("error", err.Error()))
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "无效的登录数据：" + err.Error(),
 		})
 		return
 	}
+
+	// 验证验证码
+	if !utils.VerifyCaptcha(req.CaptchaID, req.CaptchaCode) {
+		utils.Logger.Warn("验证码错误",
+			zap.String("captcha_id", req.CaptchaID),
+			zap.String("captcha_code", req.CaptchaCode))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "验证码错误或已过期"})
+		return
+	}
+
+	// 构建用户对象
+	user := model.User{
+		Username: req.Username,
+		Phone:    req.Phone,
+		Password: req.Password,
+	}
+
 	utils.Logger.Info("用户登录数据验证成功",
 		zap.String("username", user.Username),
 		zap.String("phone", user.Phone),
@@ -87,22 +114,17 @@ func LoginHandler(c *gin.Context) {
 	id, err := service.Login(user)
 	if err != nil {
 		utils.Logger.Error("用户登录失败", zap.Error(err))
-		// 记录登录失败审计日志
 		utils.AuditLogin(user.Username, false, c.ClientIP())
 		switch {
 		case errors.Is(err, service.ErrUserLogin):
-			// 用户账号或密码错误：返回 401 Unauthorized（认证失败）
 			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		default:
-			// 其他错误（如数据库异常）：返回 500 服务器错误
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器内部错误"})
 			return
 		}
 		return
 	}
-	// 记录登录成功审计日志
 	utils.AuditLogin(user.Username, true, c.ClientIP())
-	// 生成JWT令牌
 	token, err := utils.GenerateToken(id)
 	if err != nil {
 		utils.Logger.Error("生成令牌失败", zap.Error(err))

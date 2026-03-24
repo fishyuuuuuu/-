@@ -18,28 +18,48 @@ var (
 // 模拟商品数据
 var mockProducts = []map[string]interface{}{
 	{
-		"id":    1,
-		"name":  "iPhone 15 Pro",
-		"price": 7999.99,
-		"stock": 100,
+		"id":             1,
+		"name":           "iPhone 15 Pro",
+		"price":          7999.99,
+		"stock":          100,
+		"description":    "A17 Pro芯片，钛金属边框，钛金属中框设计，支持5G网络",
+		"coverImage":     "https://via.placeholder.com/400x400/667eea/ffffff?text=iPhone+15+Pro",
+		"images":         []string{"https://via.placeholder.com/400x400/667eea/ffffff?text=Image+1", "https://via.placeholder.com/400x400/764ba2/ffffff?text=Image+2"},
+		"conversionRate": 0.085,
+		"sales":          1250,
 	},
 	{
-		"id":    2,
-		"name":  "MacBook Pro 14",
-		"price": 12999.99,
-		"stock": 50,
+		"id":             2,
+		"name":           "MacBook Pro 14",
+		"price":          12999.99,
+		"stock":          50,
+		"description":    "M3 Pro芯片，14.2英寸Liquid Retina XDR显示屏，长达22小时续航",
+		"coverImage":     "https://via.placeholder.com/400x400/f093fb/ffffff?text=MacBook+Pro",
+		"images":         []string{"https://via.placeholder.com/400x400/f093fb/ffffff?text=MacBook+1", "https://via.placeholder.com/400x400/f5576c/ffffff?text=MacBook+2"},
+		"conversionRate": 0.123,
+		"sales":          890,
 	},
 	{
-		"id":    3,
-		"name":  "AirPods Pro 2",
-		"price": 1899.99,
-		"stock": 200,
+		"id":             3,
+		"name":           "AirPods Pro 2",
+		"price":          1899.99,
+		"stock":          200,
+		"description":    "主动降噪，自适应通透模式，个性化空间音频，防水设计",
+		"coverImage":     "https://via.placeholder.com/400x400/4facfe/ffffff?text=AirPods+Pro",
+		"images":         []string{"https://via.placeholder.com/400x400/4facfe/ffffff?text=AirPods+1", "https://via.placeholder.com/400x400/00f2fe/ffffff?text=AirPods+2"},
+		"conversionRate": 0.068,
+		"sales":          2100,
 	},
 	{
-		"id":    4,
-		"name":  "iPad Pro 12.9",
-		"price": 8999.99,
-		"stock": 50,
+		"id":             4,
+		"name":           "iPad Pro 12.9",
+		"price":          8999.99,
+		"stock":          50,
+		"description":    "M2芯片，Liquid Retina XDR显示屏，Apple Pencil支持",
+		"coverImage":     "https://via.placeholder.com/400x400/43e97b/ffffff?text=iPad+Pro",
+		"images":         []string{"https://via.placeholder.com/400x400/43e97b/ffffff?text=iPad+1", "https://via.placeholder.com/400x400/38f9d7/ffffff?text=iPad+2"},
+		"conversionRate": 0.095,
+		"sales":          750,
 	},
 }
 
@@ -61,13 +81,31 @@ func ReduceProductStock(ctx context.Context, productID uint, userID string) erro
 		return err
 	}
 
-	err = PublishOrderMessageReliably(ctx, userID, strconv.Itoa(int(productID)))
-	if err != nil {
-		utils.Logger.Error("订单消息发送失败，库存已扣减",
-			zap.Uint("productID", productID),
-			zap.String("userID", userID),
-			zap.Error(err))
-	}
+	// 秒杀成功，异步创建订单，减少同步操作开销
+	go func() {
+		userIDUint, _ := strconv.ParseUint(userID, 10, 64)
+		_, err = CreateMockOrder(uint(userIDUint), productID)
+		if err != nil {
+			utils.Logger.Error("创建订单失败",
+				zap.Uint("productID", productID),
+				zap.String("userID", userID),
+				zap.Error(err))
+			// 订单创建失败不影响秒杀成功，记录日志即可
+		} else {
+			utils.Logger.Info("订单创建成功",
+				zap.Uint("productID", productID),
+				zap.String("userID", userID))
+		}
+
+		// 异步发送消息队列，不阻塞主流程
+		err = PublishOrderMessageReliably(context.Background(), userID, strconv.Itoa(int(productID)))
+		if err != nil {
+			utils.Logger.Error("订单消息发送失败，库存已扣减",
+				zap.Uint("productID", productID),
+				zap.String("userID", userID),
+				zap.Error(err))
+		}
+	}()
 
 	return nil
 }
@@ -112,6 +150,7 @@ func GetProductList(ctx context.Context) ([]map[string]interface{}, error) {
 	stockService := GetStockService()
 	if err := stockService.PreheatAllStocks(ctx); err != nil {
 		utils.Logger.Warn("库存预热部分失败", zap.Error(err))
+		// 库存预热失败不影响商品列表获取
 	}
 
 	return mockProducts, nil
@@ -132,7 +171,9 @@ func GetProductInfo(ctx context.Context, ids []uint64) ([]map[string]interface{}
 	var result []map[string]interface{}
 	for _, id := range ids {
 		for _, product := range mockProducts {
-			if product["id"] == id {
+			// 转换为相同类型再比较
+			productID, _ := product["id"].(int)
+			if uint64(productID) == id {
 				result = append(result, product)
 				break
 			}
@@ -155,14 +196,31 @@ func GetProductInfo(ctx context.Context, ids []uint64) ([]map[string]interface{}
 
 // CreateProduct 创建商品
 func CreateProduct(ctx context.Context, product map[string]interface{}) error {
-	// 生成新的商品ID
-	newID := uint64(len(mockProducts) + 1)
+	// 生成新的商品ID（使用int类型保持一致）
+	newID := len(mockProducts) + 1
 	product["id"] = newID
+
+	// 初始化默认值
+	if _, ok := product["description"]; !ok {
+		product["description"] = ""
+	}
+	if _, ok := product["coverImage"]; !ok {
+		product["coverImage"] = "https://via.placeholder.com/400x400/cccccc/ffffff?text=Product"
+	}
+	if _, ok := product["images"]; !ok {
+		product["images"] = []string{}
+	}
+	if _, ok := product["conversionRate"]; !ok {
+		product["conversionRate"] = 0.0
+	}
+	if _, ok := product["sales"]; !ok {
+		product["sales"] = 0
+	}
 
 	// 添加到模拟数据
 	mockProducts = append(mockProducts, product)
 
-	utils.Logger.Info("商品创建成功", zap.Uint64("id", newID), zap.String("name", product["name"].(string)))
+	utils.Logger.Info("商品创建成功", zap.Int("id", newID), zap.String("name", product["name"].(string)))
 	return nil
 }
 
@@ -170,7 +228,9 @@ func CreateProduct(ctx context.Context, product map[string]interface{}) error {
 func UpdateProduct(ctx context.Context, id uint64, product map[string]interface{}) error {
 	// 查找商品
 	for i, p := range mockProducts {
-		if p["id"] == id {
+		// 转换为相同类型再比较
+		productID, _ := p["id"].(int)
+		if uint64(productID) == id {
 			// 更新商品信息
 			if name, ok := product["name"]; ok {
 				mockProducts[i]["name"] = name
@@ -180,6 +240,21 @@ func UpdateProduct(ctx context.Context, id uint64, product map[string]interface{
 			}
 			if stock, ok := product["stock"]; ok {
 				mockProducts[i]["stock"] = stock
+			}
+			if description, ok := product["description"]; ok {
+				mockProducts[i]["description"] = description
+			}
+			if coverImage, ok := product["coverImage"]; ok {
+				mockProducts[i]["coverImage"] = coverImage
+			}
+			if images, ok := product["images"]; ok {
+				mockProducts[i]["images"] = images
+			}
+			if conversionRate, ok := product["conversionRate"]; ok {
+				mockProducts[i]["conversionRate"] = conversionRate
+			}
+			if sales, ok := product["sales"]; ok {
+				mockProducts[i]["sales"] = sales
 			}
 
 			utils.Logger.Info("商品更新成功", zap.Uint64("id", id))
@@ -195,7 +270,9 @@ func UpdateProduct(ctx context.Context, id uint64, product map[string]interface{
 func DeleteProduct(ctx context.Context, id uint64) error {
 	// 查找并删除商品
 	for i, p := range mockProducts {
-		if p["id"] == id {
+		// 转换为相同类型再比较
+		productID, _ := p["id"].(int)
+		if uint64(productID) == id {
 			// 从切片中删除元素
 			mockProducts = append(mockProducts[:i], mockProducts[i+1:]...)
 			utils.Logger.Info("商品删除成功", zap.Uint64("id", id))
@@ -211,7 +288,9 @@ func DeleteProduct(ctx context.Context, id uint64) error {
 func GetProductByID(ctx context.Context, id uint64) (map[string]interface{}, error) {
 	// 查找商品
 	for _, product := range mockProducts {
-		if product["id"] == id {
+		// 转换为相同类型再比较
+		productID, _ := product["id"].(int)
+		if uint64(productID) == id {
 			return product, nil
 		}
 	}

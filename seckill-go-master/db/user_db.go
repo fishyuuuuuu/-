@@ -85,7 +85,7 @@ func CheckUserPassword(phone string, password string) (bool, error) {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		utils.Logger.Warn("用户不存在",
 			zap.String("phone", phone))
-		return false, err
+		return false, errors.New("用户不存在")
 	} else if err != nil {
 		utils.Logger.Error("用户检查过程中出错",
 			zap.Error(err),
@@ -96,7 +96,7 @@ func CheckUserPassword(phone string, password string) (bool, error) {
 	if err := bcrypt.CompareHashAndPassword([]byte(existingUser.Password), []byte(password)); err != nil {
 		utils.Logger.Warn("密码错误",
 			zap.String("phone", phone))
-		return false, err
+		return false, errors.New("密码错误")
 	}
 
 	return true, nil
