@@ -1,8 +1,10 @@
 package router
 
 import (
+	"net/url"
 	"seckill_go/controller"
 	"seckill_go/utils"
+	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -17,7 +19,19 @@ func Init() *gin.Engine {
 	}
 	// 全局中间件（跨域）
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:5175", "http://localhost:5176", "http://localhost:5177"},
+		// 允许本地开发端口和常见局域网调试地址，避免 Vite 自动换端口导致请求被拦截
+		AllowOriginFunc: func(origin string) bool {
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+			host := strings.ToLower(u.Hostname())
+			return host == "localhost" ||
+				host == "127.0.0.1" ||
+				strings.HasPrefix(host, "192.168.") ||
+				strings.HasPrefix(host, "10.") ||
+				strings.HasPrefix(host, "172.")
+		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
 		AllowHeaders:     []string{"Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},

@@ -8,21 +8,16 @@ const config = {
   baseURL: 'http://localhost:8081/api',
   productID: 1,
   stock: 10,
-  concurrency: 50,
+  concurrency: 200,
   testDuration: 60000, // 60秒
-  outputFile: path.join(__dirname, 'test_results.json')
+  outputFile: path.join(__dirname, 'test_results.json'),
+  testPassword: 'test123456'
 };
 
 // 测试结果
 const testResults = {
   startTime: new Date().toISOString(),
   normalUsers: {
-    total: 0,
-    successful: 0,
-    failed: 0,
-    errorMessages: []
-  },
-  scriptUsers: {
     total: 0,
     successful: 0,
     failed: 0,
@@ -44,12 +39,69 @@ function generateRandomIP() {
   return `${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 256)}`;
 }
 
+// 获取验证码ID（测试模式下验证码固定使用 1234）
+async function getCaptchaID(ip) {
+  const response = await axios.get(`${config.baseURL}/captcha`, {
+    headers: {
+      'X-Forwarded-For': ip,
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+  });
+
+  return response.headers['x-captcha-id'];
+}
+
+// 为测试用户自动注册并登录，获取有效 token
+async function getAuthToken(username, phone, ip) {
+  const captchaID = await getCaptchaID(ip);
+
+  try {
+    await axios.post(`${config.baseURL}/user/register`, {
+      username,
+      phone,
+      password: config.testPassword,
+      captcha_id: captchaID,
+      captcha_code: '1234'
+    }, {
+      headers: {
+        'X-Forwarded-For': ip,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+  } catch (error) {
+    const status = error.response?.status;
+    if (status !== 409) {
+      throw error;
+    }
+  }
+
+  const loginCaptchaID = await getCaptchaID(ip);
+  const loginResponse = await axios.post(`${config.baseURL}/user/login`, {
+    phone,
+    password: config.testPassword,
+    captcha_id: loginCaptchaID,
+    captcha_code: '1234'
+  }, {
+    headers: {
+      'X-Forwarded-For': ip,
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+  });
+
+  return loginResponse.data.token;
+}
+
 // 模拟正常用户行为
 async function simulateNormalUser(userID, ip) {
   try {
+    const username = `normal_${userID}`;
+    const phone = `13${userID.toString().padStart(9, '0').slice(-9)}`;
+    const token = await getAuthToken(username, phone, ip);
+
     // 1. 先浏览商品页面
     await axios.get(`${config.baseURL}/product/list`, {
       headers: {
+        'Authorization': `Bearer ${token}`,
         'X-Forwarded-For': ip,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
@@ -59,24 +111,17 @@ async function simulateNormalUser(userID, ip) {
     await new Promise(resolve => setTimeout(resolve, Math.random() * 1000 + 500));
 
     // 3. 获取验证码
-    const captchaResponse = await axios.get(`${config.baseURL}/captcha`, {
-      headers: {
-        'X-Forwarded-For': ip,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-
-    const captchaID = captchaResponse.headers['x-captcha-id'];
+    const captchaID = await getCaptchaID(ip);
 
     // 4. 执行秒杀（使用测试验证码）
     const startTime = Date.now();
     const seckillResponse = await axios.post(`${config.baseURL}/product/seckill`, {
       productId: config.productID,
-      userId: parseInt(userID),
       captchaId: captchaID,
       captchaStr: '1234' // 测试模式验证码
     }, {
       headers: {
+        'Authorization': `Bearer ${token}`,
         'X-Forwarded-For': ip,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
@@ -95,57 +140,11 @@ async function simulateNormalUser(userID, ip) {
     }
   } catch (error) {
     testResults.normalUsers.failed++;
-    testResults.normalUsers.errorMessages.push(error.message);
-    console.log(`正常用户 ${userID} 秒杀失败: ${error.message}`);
+    const message = error.response?.data?.error || error.response?.data?.message || error.message;
+    testResults.normalUsers.errorMessages.push(message);
+    console.log(`正常用户 ${userID} 秒杀失败: ${message}`);
   } finally {
     testResults.normalUsers.total++;
-  }
-}
-
-// 模拟脚本用户行为
-async function simulateScriptUser(userID, ip) {
-  try {
-    // 1. 直接执行秒杀（不浏览页面）
-    const captchaResponse = await axios.get(`${config.baseURL}/captcha`, {
-      headers: {
-        'X-Forwarded-For': ip,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-
-    const captchaID = captchaResponse.headers['x-captcha-id'];
-
-    // 2. 快速执行秒杀（使用测试验证码）
-    const startTime = Date.now();
-    const seckillResponse = await axios.post(`${config.baseURL}/product/seckill`, {
-      productId: config.productID,
-      userId: parseInt(userID),
-      captchaId: captchaID,
-      captchaStr: '1234' // 测试模式验证码
-    }, {
-      headers: {
-        'X-Forwarded-For': ip,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-
-    const responseTime = Date.now() - startTime;
-    testResults.systemMetrics.responseTimes.push(responseTime);
-
-    if (seckillResponse.data.message === "秒杀成功") {
-      testResults.scriptUsers.successful++;
-      console.log(`脚本用户 ${userID} 秒杀成功`);
-    } else {
-      testResults.scriptUsers.failed++;
-      testResults.scriptUsers.errorMessages.push(seckillResponse.data.message || seckillResponse.data.error);
-      console.log(`脚本用户 ${userID} 秒杀失败: ${seckillResponse.data.message || seckillResponse.data.error}`);
-    }
-  } catch (error) {
-    testResults.scriptUsers.failed++;
-    testResults.scriptUsers.errorMessages.push(error.message);
-    console.log(`脚本用户 ${userID} 秒杀失败: ${error.message}`);
-  } finally {
-    testResults.scriptUsers.total++;
   }
 }
 
@@ -174,31 +173,20 @@ async function runTest() {
 
   // 并发执行测试
   const promises = [];
-  
-  // 50% 正常用户，50% 脚本用户
-  const normalUserCount = Math.floor(config.concurrency * 0.5);
-  const scriptUserCount = config.concurrency - normalUserCount;
 
-  // 启动正常用户
-  for (let i = 0; i < normalUserCount; i++) {
+  // 全部按正常用户路径执行并发测试
+  for (let i = 0; i < config.concurrency; i++) {
     const userID = `normal-${generateUserID()}`;
     const ip = generateRandomIP();
     promises.push(simulateNormalUser(userID, ip));
-  }
-
-  // 启动脚本用户
-  for (let i = 0; i < scriptUserCount; i++) {
-    const userID = `script-${generateUserID()}`;
-    const ip = generateRandomIP();
-    promises.push(simulateScriptUser(userID, ip));
   }
 
   // 等待所有测试完成
   await Promise.all(promises);
 
   // 计算成功率
-  const totalRequests = testResults.normalUsers.total + testResults.scriptUsers.total;
-  const totalSuccessful = testResults.normalUsers.successful + testResults.scriptUsers.successful;
+  const totalRequests = testResults.normalUsers.total;
+  const totalSuccessful = testResults.normalUsers.successful;
   testResults.systemMetrics.successRate = totalRequests > 0 ? (totalSuccessful / totalRequests) * 100 : 0;
 
   // 计算平均响应时间
@@ -224,10 +212,6 @@ async function runTest() {
   console.log(`总请求: ${testResults.normalUsers.total}`);
   console.log(`成功: ${testResults.normalUsers.successful}`);
   console.log(`失败: ${testResults.normalUsers.failed}`);
-  console.log('\n脚本用户:');
-  console.log(`总请求: ${testResults.scriptUsers.total}`);
-  console.log(`成功: ${testResults.scriptUsers.successful}`);
-  console.log(`失败: ${testResults.scriptUsers.failed}`);
 }
 
 // 检查是否安装了axios

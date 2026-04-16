@@ -619,6 +619,7 @@ import { ref, onMounted, onUnmounted, computed, reactive } from 'vue';
 import axios from 'axios';
 import { useRouter } from 'vue-router';
 import Navbar from './Navbar.vue';
+import { getProductImageCandidates } from '../utils/productImages';
 
 const router = useRouter();
 
@@ -1737,16 +1738,59 @@ const getStockClass = (product) => {
   return 'in-stock';
 };
 
+// 根据商品文案推断分类，保证前端筛选仍可用
+const inferCategoryByText = (name = '', description = '') => {
+  const text = `${name} ${description}`.toLowerCase();
+  if (/手机|iphone|huawei|xiaomi|samsung|耳机|相机|手表|switch|playstation/.test(text)) return 2;
+  if (/电脑|笔记本|macbook|ipad|键盘|鼠标|显示器|显卡/.test(text)) return 3;
+  if (/空调|冰箱|洗衣机|电视|吸尘器|扫地|家电/.test(text)) return 4;
+  if (/鞋|服装|衣服|羽绒服|包/.test(text)) return 5;
+  if (/护肤|美妆|口红|香水|精华|面霜/.test(text)) return 6;
+  if (/运动|户外|瑜伽|健身/.test(text)) return 7;
+  if (/食品|饮料|咖啡|零食|矿泉水|白酒/.test(text)) return 8;
+  return 1;
+};
+
+const mapApiProductToViewModel = (product) => {
+  const price = Number(product.price) || 0;
+  const imageCandidates = getProductImageCandidates(product);
+  const image = imageCandidates[0];
+  const category = inferCategoryByText(product.name, product.description);
+  return {
+    id: Number(product.id),
+    name: product.name || '未命名商品',
+    price,
+    originalPrice: Number(product.originalPrice) || Number((price * 1.2).toFixed(2)),
+    stock: Number(product.stock) || 0,
+    description: product.description || '',
+    image,
+    imageCandidates,
+    category,
+    brand: product.brand || '商城',
+    tags: Array.isArray(product.tags) ? product.tags : [],
+    specs: product.specs || {}
+  };
+};
+
 // 获取商品列表
 const fetchProducts = async () => {
   loading.value = true;
   error.value = '';
 
   try {
-    products.value = extendedProducts;
+    const response = await axios.get('/api/product/list');
+    const apiProducts = Array.isArray(response?.data?.data) ? response.data.data : [];
+    products.value = apiProducts.map(mapApiProductToViewModel);
+
+    // 兜底：后端暂时无数据时，保留演示数据避免页面空白
+    if (products.value.length === 0) {
+      products.value = extendedProducts;
+    }
   } catch (err) {
     console.error('获取商品失败:', err);
-    error.value = '获取商品列表失败，请稍后重试';
+    // 接口异常时降级到本地演示数据，保障页面可用
+    products.value = extendedProducts;
+    error.value = '';
   } finally {
     loading.value = false;
   }
@@ -2083,6 +2127,15 @@ const getProductImage = (productId) => {
 
 // 图片加载处理
 const handleImageError = (product) => {
+  const list = Array.isArray(product.imageCandidates) ? product.imageCandidates : getProductImageCandidates(product);
+  const currentIndex = Number(product.__imageCandidateIndex || 0);
+  if (currentIndex < list.length - 1) {
+    product.__imageCandidateIndex = currentIndex + 1;
+    imageError.value[product.id] = false;
+    imageLoading.value[product.id] = true;
+    product.image = list[currentIndex + 1];
+    return;
+  }
   imageError.value[product.id] = true;
   imageLoading.value[product.id] = false;
 };

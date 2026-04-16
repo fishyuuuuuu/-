@@ -227,8 +227,10 @@
 <script setup>
 import { ref, computed, onMounted, reactive } from 'vue';
 import { useRouter } from 'vue-router';
+import axios from 'axios';
 import Navbar from './Navbar.vue';
 import ProductDetailModal from './ProductDetailModal.vue';
+import { getProductImageCandidates } from '../utils/productImages';
 
 const router = useRouter();
 
@@ -995,6 +997,67 @@ const filteredProducts = computed(() => {
   return result;
 });
 
+const inferCategoryByText = (name = '', description = '') => {
+  const text = `${name} ${description}`.toLowerCase();
+  if (/手机|iphone|huawei|xiaomi|samsung|耳机|相机|手表|switch|playstation/.test(text)) return 2;
+  if (/电脑|笔记本|macbook|ipad|键盘|鼠标|显示器|显卡/.test(text)) return 3;
+  if (/空调|冰箱|洗衣机|电视|吸尘器|扫地|家电/.test(text)) return 4;
+  if (/鞋|服装|衣服|羽绒服|包/.test(text)) return 5;
+  if (/护肤|美妆|口红|香水|精华|面霜/.test(text)) return 6;
+  if (/运动|户外|瑜伽|健身/.test(text)) return 7;
+  if (/食品|饮料|咖啡|零食|矿泉水|白酒/.test(text)) return 8;
+  return 1;
+};
+
+const mapApiProductToCategoryModel = (product) => {
+  const price = Number(product.price) || 0;
+  const stock = Number(product.stock) || 0;
+  const originalPrice = Number(product.originalPrice) || Number((price * 1.2).toFixed(2));
+  const category = inferCategoryByText(product.name, product.description);
+  const imageCandidates = getProductImageCandidates(product);
+  return {
+    id: Number(product.id),
+    name: product.name || '未命名商品',
+    description: product.description || '',
+    price,
+    originalPrice,
+    stock,
+    totalStock: stock > 0 ? stock : 1,
+    sales: Number(product.sales) || 0,
+    isSeckill: stock > 0,
+    discount: originalPrice > 0 ? Math.max(0, Math.round((1 - price/originalPrice) * 100)) : 0,
+    category,
+    brand: product.brand || '商城',
+    tags: Array.isArray(product.tags) ? product.tags : [],
+    image: imageCandidates[0]
+  };
+};
+
+const updateCategoryCounts = () => {
+  const countMap = products.value.reduce((acc, product) => {
+    acc[product.category] = (acc[product.category] || 0) + 1;
+    return acc;
+  }, {});
+  categories.value = categories.value.map((c) => ({
+    ...c,
+    count: c.id === 1 ? products.value.length : (countMap[c.id] || 0)
+  }));
+};
+
+const fetchProducts = async () => {
+  try {
+    const response = await axios.get('/api/product/list');
+    const apiProducts = Array.isArray(response?.data?.data) ? response.data.data : [];
+    if (apiProducts.length > 0) {
+      products.value = apiProducts.map(mapApiProductToCategoryModel);
+    }
+  } catch (error) {
+    console.error('获取全部商品失败:', error);
+  } finally {
+    updateCategoryCounts();
+  }
+};
+
 // 方法
 const formatPrice = (price) => {
   return price.toLocaleString('zh-CN');
@@ -1005,7 +1068,7 @@ const handleSort = () => {
 };
 
 const resetFilters = () => {
-  activeCategory.value = 'all';
+  activeCategory.value = 1;
   sortBy.value = 'default';
   showSeckillOnly.value = false;
   showInStockOnly.value = false;
@@ -1162,9 +1225,9 @@ const addToCart = (product) => {
 
 onMounted(() => {
   loading.value = true;
-  setTimeout(() => {
+  fetchProducts().finally(() => {
     loading.value = false;
-  }, 500);
+  });
 });
 </script>
 
