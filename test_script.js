@@ -4,11 +4,13 @@ const fs = require('fs');
 const path = require('path');
 
 // 配置
+const cliConcurrency = parseInt(process.argv[2], 10);
+
 const config = {
   baseURL: 'http://localhost:8081/api',
   productID: 1,
   stock: 10,
-  concurrency: 200,
+  concurrency: Number.isFinite(cliConcurrency) && cliConcurrency > 0 ? cliConcurrency : 200,
   testDuration: 60000, // 60秒
   outputFile: path.join(__dirname, 'test_results.json'),
   testPassword: 'test123456'
@@ -25,7 +27,9 @@ const testResults = {
   },
   systemMetrics: {
     responseTimes: [],
-    successRate: 0
+    successRate: 0,
+    totalDurationSeconds: 0,
+    qps: 0
   }
 };
 
@@ -166,7 +170,7 @@ async function resetTestData() {
 
 // 执行测试
 async function runTest() {
-  console.log('开始测试...');
+  console.log(`开始测试，并发数: ${config.concurrency}`);
   
   // 重置测试数据
   await resetTestData();
@@ -198,6 +202,13 @@ async function runTest() {
   // 结束时间
   testResults.endTime = new Date().toISOString();
 
+  // 计算总耗时（秒）与 QPS
+  const totalDurationMs = new Date(testResults.endTime).getTime() - new Date(testResults.startTime).getTime();
+  testResults.systemMetrics.totalDurationSeconds = totalDurationMs / 1000;
+  testResults.systemMetrics.qps = testResults.systemMetrics.totalDurationSeconds > 0
+    ? totalRequests / testResults.systemMetrics.totalDurationSeconds
+    : 0;
+
   // 保存测试结果
   fs.writeFileSync(config.outputFile, JSON.stringify(testResults, null, 2));
   console.log(`测试完成，结果已保存到 ${config.outputFile}`);
@@ -207,7 +218,9 @@ async function runTest() {
   console.log(`总请求数: ${totalRequests}`);
   console.log(`成功数: ${totalSuccessful}`);
   console.log(`成功率: ${testResults.systemMetrics.successRate.toFixed(2)}%`);
+  console.log(`总耗时: ${testResults.systemMetrics.totalDurationSeconds.toFixed(2)}s`);
   console.log(`平均响应时间: ${testResults.systemMetrics.averageResponseTime?.toFixed(2) || 0}ms`);
+  console.log(`QPS: ${testResults.systemMetrics.qps.toFixed(2)}`);
   console.log('\n正常用户:');
   console.log(`总请求: ${testResults.normalUsers.total}`);
   console.log(`成功: ${testResults.normalUsers.successful}`);

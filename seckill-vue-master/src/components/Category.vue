@@ -130,10 +130,11 @@
               <div class="product-actions">
                 <button
                   class="btn btn-seckill btn-sm"
-                  v-if="product.isSeckill && product.stock > 0"
+                  v-if="product.isSeckill"
+                  :disabled="isSeckillDisabled(product) || seckilling[product.id]"
                   @click.stop="handleSeckill(product)"
                 >
-                  立即秒杀
+                  {{ getSeckillButtonText(product) }}
                 </button>
                 <button
                   class="btn btn-primary btn-sm"
@@ -1024,13 +1025,40 @@ const mapApiProductToCategoryModel = (product) => {
     stock,
     totalStock: stock > 0 ? stock : 1,
     sales: Number(product.sales) || 0,
-    isSeckill: stock > 0,
+    isSeckill: Boolean(product.seckill?.has_event),
     discount: originalPrice > 0 ? Math.max(0, Math.round((1 - price/originalPrice) * 100)) : 0,
     category,
     brand: product.brand || '商城',
     tags: Array.isArray(product.tags) ? product.tags : [],
-    image: imageCandidates[0]
+    image: imageCandidates[0],
+    seckill: product.seckill || {
+      has_event: false,
+      start_time: '',
+      end_time: '',
+      can_seckill: false,
+      status: 'no_event',
+      status_text: '商品未绑定秒杀活动'
+    }
   };
+};
+
+const getSeckillMeta = (product) => product?.seckill || {};
+
+const isSeckillAvailableNow = (product) => {
+  const meta = getSeckillMeta(product);
+  return Boolean(meta.has_event && meta.can_seckill && product?.stock > 0);
+};
+
+const isSeckillDisabled = (product) => !isSeckillAvailableNow(product);
+
+const getSeckillButtonText = (product) => {
+  if (!product) return '秒杀';
+  if (product.stock === 0) return '已售罄';
+  const meta = getSeckillMeta(product);
+  if (!meta.has_event) return '未配置活动';
+  if (meta.status === 'not_started') return '秒杀未开始';
+  if (meta.status === 'ended') return '活动已结束';
+  return '立即秒杀';
 };
 
 const updateCategoryCounts = () => {
@@ -1093,13 +1121,15 @@ const showToastMessage = (message, type = 'success') => {
 // 获取验证码
 const fetchCaptcha = async () => {
   try {
-    // 模拟验证码请求
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // 生成随机验证码图片 URL
-    const randomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
-    captchaId.value = Date.now().toString();
-    captchaImageUrl.value = `https://placehold.co/200x60/667eea/ffffff?text=${randomCode}`;
+    const response = await axios.get('/api/captcha', {
+      responseType: 'blob',
+      headers: {
+        'Cache-Control': 'no-cache'
+      }
+    });
+    captchaId.value = response.headers['x-captcha-id'] || '';
+    const blob = new Blob([response.data], { type: 'image/png' });
+    captchaImageUrl.value = URL.createObjectURL(blob);
   } catch (e) {
     console.error('获取验证码失败', e);
     showToastMessage('获取验证码失败', 'error');
@@ -1124,16 +1154,21 @@ const submitSeckill = async (productId, product) => {
       throw new Error('商品信息错误');
     }
     
-    // 模拟秒杀请求，避免真实请求导致的服务器错误
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // 模拟秒杀成功
-    product.stock--;
+    await axios.post('/api/product/seckill', {
+      productId,
+      captchaId: captchaId.value,
+      captchaStr: captchaInput.value
+    }, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
     
     showCaptchaModal.value = false;
     successProductName.value = product.name;
     showSuccessModal.value = true;
     showToastMessage('秒杀成功！', 'success');
+    await fetchProducts();
   } catch (err) {
     console.error('秒杀失败:', err);
     showToastMessage(err.response?.data?.error || err.message || '秒杀失败，请重试', 'error');
@@ -1180,8 +1215,12 @@ const confirmCaptchaAndSeckill = async () => {
 // 处理秒杀
 const handleSeckill = async (product) => {
   try {
-    if (!product || product.stock === 0) {
-      showToastMessage('商品信息错误或已售罄', 'error');
+    if (!product) {
+      showToastMessage('商品信息错误', 'error');
+      return;
+    }
+    if (!isSeckillAvailableNow(product)) {
+      showToastMessage(product.seckill?.status_text || getSeckillButtonText(product), 'warning');
       return;
     }
 
@@ -1203,6 +1242,11 @@ const handleSeckill = async (product) => {
 };
 
 const addToCart = (product) => {
+  const meta = product?.seckill || {};
+  if (meta.has_event || product?.isSeckill) {
+    showToastMessage('秒杀商品仅支持立即秒杀，不能加入购物车', 'warning');
+    return;
+  }
   // 添加到购物车逻辑
   const cart = JSON.parse(localStorage.getItem('cart') || '[]');
   const existingItem = cart.find(item => item.id === product.id);
@@ -1215,7 +1259,8 @@ const addToCart = (product) => {
       name: product.name,
       price: product.price,
       image: product.image,
-      quantity: 1
+      quantity: 1,
+      isSeckill: false
     });
   }
 

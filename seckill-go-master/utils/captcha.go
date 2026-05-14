@@ -444,11 +444,6 @@ func GetCaptchaCode(captchaID string) string {
 
 // VerifyCaptcha 验证验证码
 func VerifyCaptcha(captchaID, captchaStr string) bool {
-	// 测试模式：如果验证码字符串为 '1234'，直接返回成功
-	if captchaStr == "1234" {
-		return true
-	}
-
 	captchaStoreMutex.Lock()
 	defer captchaStoreMutex.Unlock()
 

@@ -131,7 +131,7 @@ func GetOrderList(ctx context.Context, userID uint) ([]map[string]interface{}, e
 
 	if db.DB != nil {
 		var orders []model.Order
-		if err := db.DB.Where("user_id = ?", userID).Order("created_at DESC").Find(&orders).Error; err == nil && len(orders) > 0 {
+		if err := db.DB.Where("user_id = ?", userID).Order("created_at DESC").Find(&orders).Error; err == nil {
 			for _, order := range orders {
 				var product model.Product
 				db.DB.First(&product, order.ProductID)
@@ -148,6 +148,8 @@ func GetOrderList(ctx context.Context, userID uint) ([]map[string]interface{}, e
 				})
 			}
 			return result, nil
+		} else {
+			return nil, err
 		}
 	}
 
@@ -229,25 +231,23 @@ func GetAllOrders(ctx context.Context) ([]map[string]interface{}, error) {
 func GetOrderByID(ctx context.Context, id uint, userID uint) (map[string]interface{}, error) {
 	var order model.Order
 	if db.DB != nil {
-		if err := db.DB.First(&order, id).Error; err == nil {
-			if order.UserID == userID {
-				var product model.Product
-				db.DB.First(&product, order.ProductID)
+		if err := db.DB.Where("id = ? AND user_id = ?", id, userID).First(&order).Error; err == nil {
+			var product model.Product
+			db.DB.First(&product, order.ProductID)
 
-				return map[string]interface{}{
-					"id":           order.ID,
-					"order_no":     order.OrderNo,
-					"user_id":      order.UserID,
-					"product_id":   order.ProductID,
-					"product_name": product.Name,
-					"order_amount": order.OrderAmount,
-					"status":       order.Status,
-					"created_at":   order.CreatedAt,
-				}, nil
-			}
-			utils.Logger.Warn("订单不属于当前用户", zap.Uint("orderID", id), zap.Uint("userID", userID))
-			return nil, ErrOrderNotFound
+			return map[string]interface{}{
+				"id":           order.ID,
+				"order_no":     order.OrderNo,
+				"user_id":      order.UserID,
+				"product_id":   order.ProductID,
+				"product_name": product.Name,
+				"order_amount": order.OrderAmount,
+				"status":       order.Status,
+				"created_at":   order.CreatedAt,
+			}, nil
 		}
+		// 数据库可用时仅返回数据库结果，避免读取到 mock 旧数据
+		return nil, ErrOrderNotFound
 	}
 
 	mockOrdersMu.RLock()

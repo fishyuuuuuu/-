@@ -36,7 +36,6 @@ func SeckillHandler(c *gin.Context) {
 		ProductId  uint   `json:"productId"`
 		CaptchaId  string `json:"captchaId"`
 		CaptchaStr string `json:"captchaStr"`
-		UserId     uint   `json:"userId"` // 可选，方便测试
 	}
 	var req SeckillRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -44,14 +43,26 @@ func SeckillHandler(c *gin.Context) {
 		return
 	}
 
-	userID := req.UserId
+	var userID uint
 	if contextUserID, exists := c.Get("user_id"); exists {
-		if uid, ok := contextUserID.(uint); ok && uid > 0 {
+		if uid, ok := contextUserID.(uint); ok {
 			userID = uid
 		}
 	}
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户未登录"})
+		return
+	}
+
+	// 后端强校验：秒杀商品必须绑定活动，并且必须在活动时间窗内
+	if err := service.ValidateSeckillWindow(c, req.ProductId); err != nil {
+		utils.AuditSeckill(strconv.Itoa(int(userID)), strconv.Itoa(int(req.ProductId)), false, c.ClientIP())
+		switch err {
+		case service.ErrEventNotBound, service.ErrEventNotStarted, service.ErrEventEnded:
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "秒杀活动状态异常"})
+		}
 		return
 	}
 
@@ -70,6 +81,10 @@ func SeckillHandler(c *gin.Context) {
 	if err != nil {
 		// 记录秒杀失败审计日志
 		utils.AuditSeckill(strconv.Itoa(int(userID)), strconv.Itoa(int(req.ProductId)), false, c.ClientIP())
+		if err == service.ErrProductNotFound || err.Error() == "库存不足" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "秒杀失败"})
 		return
 	}

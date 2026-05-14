@@ -1,5 +1,5 @@
 {
-  "startTime": "2026-04-15T14:06:50.071Z",
+  "startTime": "2026-04-16T12:52:49.426Z",
   "normalUsers": {
     "total": 200,
     "successful": 10,
@@ -199,19 +199,21 @@
   },
   "systemMetrics": {
     "responseTimes": [
-      645,
-      1164,
-      440,
-      457,
-      899,
-      907,
-      876,
-      894,
-      877,
-      870
+      2557,
+      804,
+      809,
+      769,
+      772,
+      538,
+      31,
+      35,
+      94,
+      71
     ],
     "successRate": 5,
-    "averageResponseTime": 802.9
+    "totalDurationSeconds": 31.518,
+    "qps": 6.345580303318738,
+    "averageResponseTime": 648
   },
-  "endTime": "2026-04-15T14:07:22.993Z"
+  "endTime": "2026-04-16T12:53:20.944Z"
 }

@@ -89,12 +89,13 @@
           <!-- 操作按钮 -->
           <div class="action-buttons">
             <button
-              v-if="product.isSeckill && product.stock > 0"
+              v-if="product.isSeckill"
               class="btn btn-seckill btn-lg"
+              :disabled="isSeckillDisabled"
               @click="handleSeckill"
             >
               <span class="btn-icon">⚡</span>
-              立即秒杀
+              {{ seckillButtonText }}
             </button>
             <button
               v-else-if="product.stock > 0"
@@ -182,6 +183,22 @@ const stockStatusText = computed(() => {
   return '库存充足';
 });
 
+const seckillMeta = computed(() => props.product?.seckill || {});
+
+const isSeckillDisabled = computed(() => {
+  const meta = seckillMeta.value;
+  return !(meta.has_event && meta.can_seckill && props.product.stock > 0);
+});
+
+const seckillButtonText = computed(() => {
+  if (props.product.stock === 0) return '已售罄';
+  const meta = seckillMeta.value;
+  if (!meta.has_event) return '未配置活动';
+  if (meta.status === 'not_started') return '秒杀未开始';
+  if (meta.status === 'ended') return '活动已结束';
+  return '立即秒杀';
+});
+
 // 方法
 const formatPrice = (price) => {
   return price?.toLocaleString('zh-CN') || '0';
@@ -208,6 +225,9 @@ const decreaseQty = () => {
 };
 
 const handleSeckill = () => {
+  if (isSeckillDisabled.value) {
+    return;
+  }
   emit('seckill', { ...props.product, quantity: quantity.value, spec: selectedSpec.value });
 };
 

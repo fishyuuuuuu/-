@@ -4,6 +4,7 @@ import (
 	"errors"
 	"seckill_go/model"
 	"seckill_go/utils"
+	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
@@ -118,14 +119,16 @@ func GetAllUsers(page, pageSize int) ([]model.User, int64, error) {
 	var users []model.User
 	var total int64
 
+	query := DB.Model(&model.User{}).Where("status <> ? OR status IS NULL OR status = ''", "已拉黑")
+
 	// 获取总记录数
-	err := DB.Model(&model.User{}).Count(&total).Error
+	err := query.Count(&total).Error
 	if err != nil {
 		return nil, 0, err
 	}
 
 	// 获取分页数据
-	err = DB.Offset(offset).Limit(pageSize).Find(&users).Error
+	err = query.Offset(offset).Limit(pageSize).Find(&users).Error
 	if err != nil {
 		return nil, 0, err
 	}
@@ -139,7 +142,7 @@ func GetAllUsers(page, pageSize int) ([]model.User, int64, error) {
 func GetUsersByCondition(condition map[string]interface{}) ([]model.User, error) {
 	var users []model.User
 
-	query := DB.Model(&model.User{})
+	query := DB.Model(&model.User{}).Where("status <> ? OR status IS NULL OR status = ''", "已拉黑")
 
 	// 构建查询条件
 	if username, ok := condition["username"]; ok && username != "" {
@@ -183,4 +186,80 @@ func UpdateUser(user *model.User) error {
 	// 只更新非零值字段（避免覆盖未修改的字段）
 	result := DB.Model(&model.User{}).Where("id = ?", user.ID).Updates(user)
 	return result.Error
+}
+
+// GetUserByAccount 根据用户名或手机号查询用户
+func GetUserByAccount(account string) (*model.User, error) {
+	if account == "" {
+		return nil, errors.New("账号不能为空")
+	}
+
+	var user model.User
+	err := DB.Where("username = ? OR phone = ?", account, account).First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("用户不存在")
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+// UpdateUserBlacklistStatus 更新用户黑名单状态
+func UpdateUserBlacklistStatus(id uint, status string, reason string, operator string, blacklistTime *time.Time) error {
+	if id == 0 {
+		return errors.New("用户ID不能为空")
+	}
+
+	updates := map[string]interface{}{
+		"status":             status,
+		"blacklist_reason":   reason,
+		"blacklist_operator": operator,
+		"blacklist_time":     blacklistTime,
+	}
+	return DB.Model(&model.User{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// GetBlacklistedUsers 获取黑名单用户列表
+func GetBlacklistedUsers(page, pageSize int, username, operator, blacklistStartTime, blacklistEndTime string) ([]model.User, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	}
+
+	query := DB.Model(&model.User{}).Where("status = ?", "已拉黑")
+	if username != "" {
+		query = query.Where("username LIKE ?", "%"+username+"%")
+	}
+	if operator != "" {
+		query = query.Where("blacklist_operator LIKE ?", "%"+operator+"%")
+	}
+	if blacklistStartTime != "" {
+		startAt, err := time.Parse(time.RFC3339, blacklistStartTime)
+		if err != nil {
+			return nil, 0, err
+		}
+		query = query.Where("blacklist_time >= ?", startAt)
+	}
+	if blacklistEndTime != "" {
+		endAt, err := time.Parse(time.RFC3339, blacklistEndTime)
+		if err != nil {
+			return nil, 0, err
+		}
+		query = query.Where("blacklist_time <= ?", endAt)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var users []model.User
+	err := query.Order("blacklist_time DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&users).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
 }

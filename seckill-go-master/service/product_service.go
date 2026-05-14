@@ -66,6 +66,31 @@ var mockProducts = []map[string]interface{}{
 	},
 }
 
+func cloneProductMap(product map[string]interface{}) map[string]interface{} {
+	cloned := make(map[string]interface{}, len(product)+1)
+	for k, v := range product {
+		cloned[k] = v
+	}
+	return cloned
+}
+
+func enrichProductRuntimeData(ctx context.Context, product map[string]interface{}) map[string]interface{} {
+	view := cloneProductMap(product)
+	productID, ok := toUintFromAny(view["id"])
+	if !ok || productID == 0 {
+		return view
+	}
+
+	// 使用实时库存覆盖展示库存，避免 Redis 与内存库存不一致导致前端不刷新
+	if stock, err := GetStockService().GetStock(ctx, productID); err == nil {
+		view["stock"] = stock
+	}
+
+	// 注入秒杀活动状态，供前端控制按钮与提示文案
+	view["seckill"] = BuildSeckillInfoByProductID(ctx, productID)
+	return view
+}
+
 // ReduceProductStock 扣减商品库存（使用新的库存服务）
 func ReduceProductStock(ctx context.Context, productID uint, userID string) error {
 	stockService := GetStockService()
@@ -84,60 +109,62 @@ func ReduceProductStock(ctx context.Context, productID uint, userID string) erro
 		return err
 	}
 
-	// 秒杀成功，异步创建订单，减少同步操作开销
-	go func() {
-		userIDUint, _ := strconv.ParseUint(userID, 10, 64)
-		if db.DB != nil {
-			var product model.Product
-			if err := db.DB.First(&product, productID).Error; err == nil {
-				order := model.Order{
-					OrderNo:     "SK" + strconv.FormatInt(time.Now().UnixNano(), 10),
-					UserID:      uint(userIDUint),
-					ProductID:   productID,
-					OrderAmount: product.Price,
-					Status:      model.OrderStatusPending,
-				}
-				if err := db.DB.Create(&order).Error; err != nil {
-					utils.Logger.Error("创建订单失败",
-						zap.Uint("productID", productID),
-						zap.String("userID", userID),
-						zap.Error(err))
-				} else {
-					utils.Logger.Info("订单创建成功",
-						zap.Uint("productID", productID),
-						zap.String("userID", userID),
-						zap.Uint("orderID", order.ID))
-					return
-				}
-			} else {
-				utils.Logger.Error("查询商品失败，降级到模拟订单",
-					zap.Uint("productID", productID),
-					zap.String("userID", userID),
-					zap.Error(err))
-			}
-		}
+	// 改为同步创建订单：接口返回成功时，订单必须已经可查询
+	userIDUint, parseErr := strconv.ParseUint(userID, 10, 64)
+	if parseErr != nil {
+		_ = stockService.RestoreStock(ctx, productID, 1)
+		return errors.New("创建订单失败")
+	}
 
-		_, err = CreateMockOrder(uint(userIDUint), productID)
-		if err != nil {
-			utils.Logger.Error("创建订单失败",
+	if db.DB != nil {
+		var product model.Product
+		if err := db.DB.First(&product, productID).Error; err != nil {
+			_ = stockService.RestoreStock(ctx, productID, 1)
+			utils.Logger.Error("查询商品失败，订单创建回滚库存",
 				zap.Uint("productID", productID),
 				zap.String("userID", userID),
 				zap.Error(err))
-			return
+			return errors.New("创建订单失败")
 		}
 
-		err = PublishOrderMessageReliably(context.Background(), userID, strconv.Itoa(int(productID)))
-		if err != nil {
-			utils.Logger.Error("订单消息发送失败",
+		order := model.Order{
+			OrderNo:     "SK" + strconv.FormatInt(time.Now().UnixNano(), 10),
+			UserID:      uint(userIDUint),
+			ProductID:   productID,
+			OrderAmount: product.Price,
+			Status:      model.OrderStatusPending,
+		}
+		if err := db.DB.Create(&order).Error; err != nil {
+			_ = stockService.RestoreStock(ctx, productID, 1)
+			utils.Logger.Error("创建订单失败，已回滚库存",
 				zap.Uint("productID", productID),
 				zap.String("userID", userID),
 				zap.Error(err))
-		} else {
-			utils.Logger.Info("订单创建成功",
-				zap.Uint("productID", productID),
-				zap.String("userID", userID))
+			return errors.New("创建订单失败")
 		}
-	}()
+
+		utils.Logger.Info("订单创建成功",
+			zap.Uint("productID", productID),
+			zap.String("userID", userID),
+			zap.Uint("orderID", order.ID))
+	} else {
+		if _, err := CreateMockOrder(uint(userIDUint), productID); err != nil {
+			_ = stockService.RestoreStock(ctx, productID, 1)
+			utils.Logger.Error("创建模拟订单失败，已回滚库存",
+				zap.Uint("productID", productID),
+				zap.String("userID", userID),
+				zap.Error(err))
+			return errors.New("创建订单失败")
+		}
+	}
+
+	// 消息发送保持原有能力，失败不影响用户可见结果
+	if err := PublishOrderMessageReliably(context.Background(), userID, strconv.Itoa(int(productID))); err != nil {
+		utils.Logger.Error("订单消息发送失败",
+			zap.Uint("productID", productID),
+			zap.String("userID", userID),
+			zap.Error(err))
+	}
 
 	return nil
 }
@@ -185,7 +212,11 @@ func GetProductList(ctx context.Context) ([]map[string]interface{}, error) {
 		// 库存预热失败不影响商品列表获取
 	}
 
-	return mockProducts, nil
+	result := make([]map[string]interface{}, 0, len(mockProducts))
+	for _, product := range mockProducts {
+		result = append(result, enrichProductRuntimeData(ctx, product))
+	}
+	return result, nil
 }
 
 // GetProductInfo 先查缓存，缓存未命中则查库并同步到缓存
@@ -206,7 +237,7 @@ func GetProductInfo(ctx context.Context, ids []uint64) ([]map[string]interface{}
 			// 转换为相同类型再比较
 			productID, _ := product["id"].(int)
 			if uint64(productID) == id {
-				result = append(result, product)
+				result = append(result, enrichProductRuntimeData(ctx, product))
 				break
 			}
 		}
@@ -323,7 +354,7 @@ func GetProductByID(ctx context.Context, id uint64) (map[string]interface{}, err
 		// 转换为相同类型再比较
 		productID, _ := product["id"].(int)
 		if uint64(productID) == id {
-			return product, nil
+			return enrichProductRuntimeData(ctx, product), nil
 		}
 	}
 

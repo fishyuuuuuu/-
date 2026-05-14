@@ -6,6 +6,8 @@ import (
 	"seckill_go/model"
 	"seckill_go/service"
 	"seckill_go/utils"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -27,6 +29,10 @@ type RegisterRequest struct {
 	Password    string `json:"password" binding:"required,min=6,max=72"`
 	CaptchaID   string `json:"captcha_id" binding:"required"`
 	CaptchaCode string `json:"captcha_code" binding:"required,min=4,max=8"`
+}
+
+type UserBlacklistRequest struct {
+	Reason string `json:"reason" binding:"required,max=255"`
 }
 
 // RegisterHandler 处理用户注册请求
@@ -114,6 +120,9 @@ func LoginHandler(c *gin.Context) {
 		utils.Logger.Error("用户登录失败", zap.Error(err))
 		utils.AuditLogin(user.Username, false, c.ClientIP())
 		switch {
+		case errors.Is(err, service.ErrUserBlocked):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
 		case errors.Is(err, service.ErrUserLogin):
 			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		default:
@@ -196,6 +205,106 @@ func GetUserListHandler(c *gin.Context) {
 		"page":       pageInt,
 		"pageSize":   pageSizeInt,
 		"totalPages": (int(total) + pageSizeInt - 1) / pageSizeInt,
+	})
+}
+
+// GetBlacklistedUsersHandler 获取黑名单列表
+func GetBlacklistedUsersHandler(c *gin.Context) {
+	utils.Logger.Info("处理黑名单列表请求")
+
+	pageInt := utils.StringToInt(c.DefaultQuery("page", "1"))
+	pageSizeInt := utils.StringToInt(c.DefaultQuery("pageSize", "10"))
+	if pageInt <= 0 {
+		pageInt = 1
+	}
+	if pageSizeInt <= 0 || pageSizeInt > 100 {
+		pageSizeInt = 10
+	}
+
+	username := strings.TrimSpace(c.Query("username"))
+	operator := strings.TrimSpace(c.Query("operator"))
+	blacklistStartTime := strings.TrimSpace(c.Query("blacklist_start_time"))
+	blacklistEndTime := strings.TrimSpace(c.Query("blacklist_end_time"))
+
+	users, total, err := service.GetBlacklistedUsers(pageInt, pageSizeInt, username, operator, blacklistStartTime, blacklistEndTime)
+	if err != nil {
+		utils.Logger.Error("获取黑名单列表失败", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取黑名单列表失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"users":      users,
+		"total":      total,
+		"page":       pageInt,
+		"pageSize":   pageSizeInt,
+		"totalPages": (int(total) + pageSizeInt - 1) / pageSizeInt,
+	})
+}
+
+// AddUserToBlacklistHandler 将账号加入黑名单
+func AddUserToBlacklistHandler(c *gin.Context) {
+	var req UserBlacklistRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求数据"})
+		return
+	}
+
+	targetUserID := utils.StringToUint(c.Param("id"))
+	if targetUserID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的用户ID"})
+		return
+	}
+
+	userIDValue, _ := c.Get("user_id")
+	operatorID, _ := userIDValue.(uint)
+
+	user, err := service.BlacklistUser(operatorID, targetUserID, req.Reason)
+	if err != nil {
+		utils.Logger.Error("拉黑用户失败", zap.Error(err), zap.Uint("target_user_id", targetUserID))
+		switch {
+		case errors.Is(err, service.ErrForbiddenBlacklistAction):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	utils.AuditBlacklistManagement(strconv.Itoa(int(operatorID)), "add", user.ID, user.Username, req.Reason, c.ClientIP())
+	c.JSON(http.StatusOK, gin.H{
+		"message": "加入黑名单成功",
+		"user":    user,
+	})
+}
+
+// RemoveUserFromBlacklistHandler 将账号移出黑名单
+func RemoveUserFromBlacklistHandler(c *gin.Context) {
+	targetUserID := utils.StringToUint(c.Param("id"))
+	if targetUserID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的用户ID"})
+		return
+	}
+
+	userIDValue, _ := c.Get("user_id")
+	operatorID, _ := userIDValue.(uint)
+
+	user, err := service.RemoveUserFromBlacklist(operatorID, targetUserID)
+	if err != nil {
+		utils.Logger.Error("移出黑名单失败", zap.Error(err), zap.Uint("target_user_id", targetUserID))
+		switch {
+		case errors.Is(err, service.ErrForbiddenBlacklistAction):
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	utils.AuditBlacklistManagement(strconv.Itoa(int(operatorID)), "remove", user.ID, user.Username, "", c.ClientIP())
+	c.JSON(http.StatusOK, gin.H{
+		"message": "移出黑名单成功",
+		"user":    user,
 	})
 }
 
@@ -328,6 +437,18 @@ func AuthMiddleware() gin.HandlerFunc {
 		// 将用户ID存储到上下文中
 		c.Set("user_id", claims.UserID)
 		c.Set("userID", claims.UserID)
+
+		blocked, err := service.IsUserBlacklisted(claims.UserID)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "用户状态校验失败"})
+			c.Abort()
+			return
+		}
+		if blocked {
+			c.JSON(http.StatusForbidden, gin.H{"error": "账号已被拉黑，禁止访问"})
+			c.Abort()
+			return
+		}
 		c.Next()
 	}
 }

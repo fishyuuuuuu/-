@@ -39,3 +39,36 @@ func RBACMiddleware(permissionCode string) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// SuperAdminMiddleware 超级管理员检查中间件
+func SuperAdminMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDValue, exists := c.Get("user_id")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未认证"})
+			c.Abort()
+			return
+		}
+
+		userID, ok := userIDValue.(uint)
+		if !ok || userID == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未认证"})
+			c.Abort()
+			return
+		}
+
+		allowed, err := service.IsSuperAdmin(userID)
+		if err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "无权限访问"})
+			c.Abort()
+			return
+		}
+		if !allowed {
+			c.JSON(http.StatusForbidden, gin.H{"error": "仅超级管理员可执行该操作"})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}

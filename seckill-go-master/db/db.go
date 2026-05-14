@@ -67,6 +67,7 @@ func autoMigrate() error {
 	return DB.AutoMigrate(
 		&model.User{}, // 用户表
 		&model.Product{},
+		&model.Event{},
 		&model.Order{},
 		&model.Role{},
 		&model.Permission{},

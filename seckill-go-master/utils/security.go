@@ -60,6 +60,15 @@ type SecurityManager struct {
 var securityManager *SecurityManager
 var securityManagerOnce sync.Once
 var suspiciousInputPattern = regexp.MustCompile(`(?i)(\b(select|union|insert|update|delete|drop|truncate|alter|exec|sleep|benchmark)\b|--|/\*|\*/|;)`)
+var suspiciousPathPattern = regexp.MustCompile(`(?i)(--|/\*|\*/|;)`)
+
+func isEventManagementPath(path string) bool {
+	return strings.HasPrefix(path, "/api/event/")
+}
+
+func isJSONRequest(c *gin.Context) bool {
+	return strings.Contains(strings.ToLower(c.GetHeader("Content-Type")), "application/json")
+}
 
 // GetSecurityManager 获取安全管理器实例
 func GetSecurityManager() *SecurityManager {
@@ -464,11 +473,32 @@ func SecurityMiddleware() gin.HandlerFunc {
 }
 
 func hasSuspiciousInput(c *gin.Context) bool {
+	path := c.Request.URL.Path
 	rawQuery := c.Request.URL.RawQuery
+	// 活动管理接口常使用 /update 语义和 RFC3339 时间字符串，避免关键词规则误伤。
+	if isEventManagementPath(path) {
+		if suspiciousPathPattern.MatchString(rawQuery) {
+			return true
+		}
+		if suspiciousPathPattern.MatchString(path) {
+			return true
+		}
+		for _, values := range c.Request.URL.Query() {
+			for _, value := range values {
+				if suspiciousPathPattern.MatchString(value) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
 	if suspiciousInputPattern.MatchString(rawQuery) {
 		return true
 	}
-	if suspiciousInputPattern.MatchString(c.Request.URL.Path) {
+	// 路径本身经常包含 RESTful 动词（如 /update /delete），
+	// 不应按 SQL 关键字拦截，仅拦截明确危险符号。
+	if suspiciousPathPattern.MatchString(path) {
 		return true
 	}
 	for _, values := range c.Request.URL.Query() {
@@ -478,11 +508,14 @@ func hasSuspiciousInput(c *gin.Context) bool {
 			}
 		}
 	}
-	if err := c.Request.ParseForm(); err == nil {
-		for _, values := range c.Request.PostForm {
-			for _, value := range values {
-				if suspiciousInputPattern.MatchString(strings.TrimSpace(value)) {
-					return true
+	// JSON 请求体无需走 ParseForm，避免在 PUT/POST JSON 场景下出现误判或干扰后续绑定。
+	if !isJSONRequest(c) {
+		if err := c.Request.ParseForm(); err == nil {
+			for _, values := range c.Request.PostForm {
+				for _, value := range values {
+					if suspiciousInputPattern.MatchString(strings.TrimSpace(value)) {
+						return true
+					}
 				}
 			}
 		}

@@ -110,7 +110,7 @@ func CheckPermission(userID uint, permissionCode string) (bool, error) {
 	db.DB.Model(&user).
 		Joins("JOIN user_roles ON users.id = user_roles.user_id").
 		Joins("JOIN roles ON user_roles.role_id = roles.id").
-		Where("users.id = ? AND roles.name = ?", userID, "管理员").
+		Where("users.id = ? AND roles.name IN ?", userID, []string{"管理员", "超级管理员"}).
 		Count(&roleCount)
 	if roleCount > 0 {
 		return true, nil
@@ -120,6 +120,23 @@ func CheckPermission(userID uint, permissionCode string) (bool, error) {
 	var count int64
 	db.DB.Model(&user).Joins("JOIN user_roles ON users.id = user_roles.user_id").Joins("JOIN role_permissions ON user_roles.role_id = role_permissions.role_id").Joins("JOIN permissions ON role_permissions.permission_id = permissions.id").Where("users.id = ? AND permissions.code = ?", userID, permissionCode).Count(&count)
 
+	return count > 0, nil
+}
+
+// HasRole 检查用户是否拥有指定角色
+func HasRole(userID uint, roleName string) (bool, error) {
+	if db.DB == nil {
+		return true, nil
+	}
+
+	var count int64
+	err := db.DB.Table("user_roles").
+		Joins("JOIN roles ON user_roles.role_id = roles.id").
+		Where("user_roles.user_id = ? AND roles.name = ?", userID, roleName).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
 	return count > 0, nil
 }
 
@@ -155,6 +172,7 @@ func InitDefaultRoles() error {
 	roles := []model.Role{
 		{Name: "普通用户", Description: "普通用户角色"},
 		{Name: "管理员", Description: "管理员角色"},
+		{Name: "超级管理员", Description: "超级管理员角色"},
 	}
 
 	for _, role := range roles {
@@ -188,6 +206,14 @@ func InitDefaultRoles() error {
 	db.DB.Find(&allPermissions)
 	for _, permission := range allPermissions {
 		AssignPermissionToRole(adminRole.ID, permission.ID)
+	}
+
+	superAdminRole, err := GetRoleByName("超级管理员")
+	if err != nil {
+		return err
+	}
+	for _, permission := range allPermissions {
+		AssignPermissionToRole(superAdminRole.ID, permission.ID)
 	}
 
 	return nil

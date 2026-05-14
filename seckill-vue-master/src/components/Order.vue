@@ -259,6 +259,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import axios from 'axios';
 import Navbar from './Navbar.vue';
 
 const router = useRouter();
@@ -294,79 +295,7 @@ const payMethods = ref([
 ]);
 
 // 订单数据
-const orders = ref([
-  {
-    id: '20260320001',
-    items: [
-      {
-        name: 'iPhone 15 Pro',
-        price: 7999,
-        quantity: 1,
-        image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=iPhone%2015%20Pro%20titanium%20metal%20smartphone%20with%20triple%20camera%20system%20on%20white%20background%20professional%20product%20photography&image_size=square',
-        spec: '256GB 钛金属'
-      }
-    ],
-    totalPrice: 7999,
-    status: 'pending',
-    statusText: '待支付',
-    createdAt: '2026-03-20 10:30:00'
-  },
-  {
-    id: '20260319002',
-    items: [
-      {
-        name: 'MacBook Pro 14',
-        price: 12999,
-        quantity: 1,
-        image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=MacBook%20Pro%2014%20inch%20laptop%20with%20silver%20aluminum%20body%20open%20on%20white%20background%20professional%20product%20photography&image_size=square',
-        spec: 'M3 Pro 18GB+512GB'
-      },
-      {
-        name: 'AirPods Pro 2',
-        price: 1899,
-        quantity: 1,
-        image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=AirPods%20Pro%202%20wireless%20earbuds%20with%20charging%20case%20on%20white%20background%20professional%20product%20photography&image_size=square',
-        spec: 'MagSafe充电盒'
-      }
-    ],
-    totalPrice: 14898,
-    status: 'paid',
-    statusText: '待发货',
-    createdAt: '2026-03-19 15:45:00'
-  },
-  {
-    id: '20260318003',
-    items: [
-      {
-        name: 'iPad Pro 12.9',
-        price: 8999,
-        quantity: 1,
-        image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=iPad%20Pro%2012.9%20inch%20tablet%20with%20Apple%20Pencil%20on%20white%20background%20professional%20product%20photography&image_size=square',
-        spec: 'M2 256GB WiFi'
-      }
-    ],
-    totalPrice: 8999,
-    status: 'shipped',
-    statusText: '待收货',
-    createdAt: '2026-03-18 09:20:00'
-  },
-  {
-    id: '20260315004',
-    items: [
-      {
-        name: 'Apple Watch Ultra 2',
-        price: 6299,
-        quantity: 1,
-        image: 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=Apple%20Watch%20Ultra%20titanium%20smartwatch%20on%20white%20background%20professional%20product%20photography&image_size=square',
-        spec: '钛金属表壳 海洋表带'
-      }
-    ],
-    totalPrice: 6299,
-    status: 'completed',
-    statusText: '已完成',
-    createdAt: '2026-03-15 14:00:00'
-  }
-]);
+const orders = ref([]);
 
 // 计算属性
 const pendingOrders = computed(() => orders.value.filter(o => o.status === 'pending'));
@@ -404,6 +333,66 @@ const toastIcon = computed(() => {
   return icons[toastType.value] || '✓';
 });
 
+const getOrderStatusKey = (status) => {
+  const normalized = Number(status);
+  if (normalized === 0) return 'pending';
+  if (normalized === 1) return 'paid';
+  if (normalized === 2) return 'completed';
+  return 'pending';
+};
+
+const getOrderStatusText = (status) => {
+  const normalized = Number(status);
+  if (normalized === 0) return '待支付';
+  if (normalized === 1) return '已支付';
+  if (normalized === 2) return '已取消';
+  return '待支付';
+};
+
+const buildOrderImage = (productName) => {
+  const name = productName || 'Product';
+  return `https://placehold.co/160x160/667eea/ffffff?text=${encodeURIComponent(name)}`;
+};
+
+const mapBackendOrder = (order) => ({
+  id: String(order.order_no || order.id || ''),
+  rawId: order.id,
+  items: [
+    {
+      name: order.product_name || '未知商品',
+      price: Number(order.order_amount || 0),
+      quantity: 1,
+      image: buildOrderImage(order.product_name),
+      spec: '秒杀订单'
+    }
+  ],
+  totalPrice: Number(order.order_amount || 0),
+  status: getOrderStatusKey(order.status),
+  statusText: getOrderStatusText(order.status),
+  createdAt: order.created_at || new Date().toISOString()
+});
+
+const fetchOrders = async () => {
+  loading.value = true;
+  try {
+    const token = localStorage.getItem('token');
+    const response = await axios.get('/api/order/list', {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    const backendOrders = Array.isArray(response?.data?.data) ? response.data.data : [];
+    orders.value = backendOrders.map(mapBackendOrder);
+  } catch (error) {
+    console.error('获取订单失败:', error);
+    orders.value = [];
+    showToastMessage(error.response?.data?.error || '获取订单失败', 'error');
+  } finally {
+    loading.value = false;
+  }
+};
+
 // 方法
 const formatPrice = (price) => {
   return price?.toLocaleString('zh-CN') || '0';
@@ -430,7 +419,7 @@ const confirmPay = () => {
     showPayModal.value = false;
     if (currentOrder.value) {
       currentOrder.value.status = 'paid';
-      currentOrder.value.statusText = '待发货';
+      currentOrder.value.statusText = '已支付';
     }
     showToastMessage('支付成功！', 'success');
   }, 1500);
@@ -449,7 +438,8 @@ const confirmCancel = () => {
     if (currentOrder.value) {
       const index = orders.value.findIndex(o => o.id === currentOrder.value.id);
       if (index > -1) {
-        orders.value.splice(index, 1);
+        orders.value[index].status = 'completed';
+        orders.value[index].statusText = '已取消';
       }
     }
     showToastMessage('订单已取消', 'success');
@@ -489,10 +479,7 @@ const showToastMessage = (message, type = 'success') => {
 
 // 生命周期
 onMounted(() => {
-  loading.value = true;
-  setTimeout(() => {
-    loading.value = false;
-  }, 500);
+  fetchOrders();
 });
 </script>
 

@@ -5,6 +5,8 @@ import (
 	"seckill_go/db"
 	"seckill_go/model"
 	"seckill_go/utils"
+	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
@@ -14,6 +16,8 @@ import (
 var (
 	ErrUserExists = errors.New("用户已存在")     // 用户已存在错误
 	ErrUserLogin  = errors.New("用户帐号或密码错误") // 用户帐号或密码错误
+	ErrUserBlocked = errors.New("账号已被拉黑，禁止登录")
+	ErrForbiddenBlacklistAction = errors.New("仅超级管理员可执行该操作")
 )
 
 func Register(user model.User) error {
@@ -80,6 +84,13 @@ func Login(user model.User) (uint, error) {
 			zap.Error(err))
 		return 0, ErrUserLogin
 	}
+	if existingUser.Status == "已拉黑" {
+		utils.Logger.Warn("拉黑账号尝试登录",
+			zap.String("loginBy", loginBy),
+			zap.String("account", account),
+			zap.Uint("user_id", existingUser.ID))
+		return 0, ErrUserBlocked
+	}
 	if err := bcrypt.CompareHashAndPassword([]byte(existingUser.Password), []byte(user.Password)); err != nil {
 		utils.Logger.Warn("密码错误",
 			zap.String("loginBy", loginBy),
@@ -116,6 +127,108 @@ func UpdateUserInfo(user *model.User) error {
 // DeleteUserByID 删除用户
 func DeleteUserByID(id uint) error {
 	return db.DeleteUser(id)
+}
+
+// GetBlacklistedUsers 获取黑名单用户列表
+func GetBlacklistedUsers(page, pageSize int, username, operator, blacklistStartTime, blacklistEndTime string) ([]model.User, int64, error) {
+	return db.GetBlacklistedUsers(page, pageSize, username, operator, blacklistStartTime, blacklistEndTime)
+}
+
+// IsSuperAdmin 判断用户是否为超级管理员
+func IsSuperAdmin(userID uint) (bool, error) {
+	return HasRole(userID, "超级管理员")
+}
+
+// IsUserBlacklisted 判断用户是否已被拉黑
+func IsUserBlacklisted(userID uint) (bool, error) {
+	user, err := db.GetUserByID(userID)
+	if err != nil {
+		return false, err
+	}
+	return user.Status == "已拉黑", nil
+}
+
+// BlacklistUser 拉黑用户
+func BlacklistUser(operatorID uint, targetUserID uint, reason string) (*model.User, error) {
+	allowed, err := IsSuperAdmin(operatorID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrForbiddenBlacklistAction
+	}
+	if operatorID == targetUserID {
+		return nil, errors.New("不能将当前登录账号加入黑名单")
+	}
+
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, errors.New("拉黑原因不能为空")
+	}
+	if len([]rune(reason)) > 255 {
+		return nil, errors.New("拉黑原因不能超过255个字符")
+	}
+
+	targetUser, err := db.GetUserByID(targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if targetUser.Status == "已拉黑" {
+		return targetUser, nil
+	}
+
+	isTargetSuperAdmin, err := IsSuperAdmin(targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if isTargetSuperAdmin {
+		return nil, errors.New("不能拉黑超级管理员账号")
+	}
+
+	operator, err := db.GetUserByID(operatorID)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	if err := db.UpdateUserBlacklistStatus(targetUserID, "已拉黑", reason, operator.Username, &now); err != nil {
+		return nil, err
+	}
+
+	targetUser.Status = "已拉黑"
+	targetUser.BlacklistReason = reason
+	targetUser.BlacklistTime = &now
+	targetUser.BlacklistOperator = operator.Username
+	return targetUser, nil
+}
+
+// RemoveUserFromBlacklist 将用户移出黑名单
+func RemoveUserFromBlacklist(operatorID uint, targetUserID uint) (*model.User, error) {
+	allowed, err := IsSuperAdmin(operatorID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrForbiddenBlacklistAction
+	}
+
+	targetUser, err := db.GetUserByID(targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if targetUser.Status != "已拉黑" {
+		return targetUser, nil
+	}
+
+	if err := db.UpdateUserBlacklistStatus(targetUserID, "正常", "", "", nil); err != nil {
+		return nil, err
+	}
+
+	targetUser.Status = "正常"
+	targetUser.BlacklistReason = ""
+	targetUser.BlacklistTime = nil
+	targetUser.BlacklistOperator = ""
+	return targetUser, nil
 }
 
 // InitDefaultAdminUser 初始化默认管理员用户
@@ -176,13 +289,27 @@ func InitDefaultAdminUser() error {
 
 	if err := AssignRoleToUser(userID, adminRole.ID); err != nil {
 		utils.Logger.Warn("为管理员用户分配角色失败", zap.Error(err))
+	} else {
+		utils.Logger.Info("管理员角色分配成功",
+			zap.String("username", "admin"),
+			zap.Uint("user_id", userID),
+			zap.Uint("role_id", adminRole.ID))
+	}
+
+	superAdminRole, err := GetRoleByName("超级管理员")
+	if err != nil {
+		utils.Logger.Warn("获取超级管理员角色失败，跳过角色分配", zap.Error(err))
+		return nil
+	}
+	if err := AssignRoleToUser(userID, superAdminRole.ID); err != nil {
+		utils.Logger.Warn("为管理员用户分配超级管理员角色失败", zap.Error(err))
 		return nil
 	}
 
-	utils.Logger.Info("管理员角色分配成功",
+	utils.Logger.Info("超级管理员角色分配成功",
 		zap.String("username", "admin"),
 		zap.Uint("user_id", userID),
-		zap.Uint("role_id", adminRole.ID))
+		zap.Uint("role_id", superAdminRole.ID))
 
 	return nil
 }

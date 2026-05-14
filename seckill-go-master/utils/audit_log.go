@@ -63,3 +63,14 @@ func AuditEventManagement(userID string, action string, eventID string, ip strin
 		"ip":         ip,
 	})
 }
+
+// AuditBlacklistManagement 记录账号黑名单管理审计日志
+func AuditBlacklistManagement(operator string, action string, targetUserID uint, targetUsername string, reason string, ip string) {
+	AuditLog("user_blacklist_management", operator, map[string]interface{}{
+		"sub_action":      action,
+		"target_user_id":  targetUserID,
+		"target_username": targetUsername,
+		"reason":          reason,
+		"ip":              ip,
+	})
+}

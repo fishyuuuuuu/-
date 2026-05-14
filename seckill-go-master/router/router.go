@@ -69,11 +69,13 @@ func Init() *gin.Engine {
 		{
 			user.POST("/register", controller.RegisterHandler) // 注册接口
 			user.POST("/login", controller.LoginHandler)       // 登录接口
-			// 用户管理接口，暂时移除认证方便测试
-			user.GET("/list", controller.GetUserListHandler)
-			user.GET("/get/:id", controller.GetUserByIDHandler)
-			user.PUT("/update/:id", controller.UpdateUserHandler)
-			user.DELETE("/delete/:id", controller.DeleteUserHandler)
+			user.GET("/list", controller.AuthMiddleware(), controller.RBACMiddleware("security:read"), controller.GetUserListHandler)
+			user.GET("/blacklist", controller.AuthMiddleware(), controller.RBACMiddleware("security:read"), controller.GetBlacklistedUsersHandler)
+			user.POST("/blacklist/:id", controller.AuthMiddleware(), controller.SuperAdminMiddleware(), controller.AddUserToBlacklistHandler)
+			user.DELETE("/blacklist/:id", controller.AuthMiddleware(), controller.SuperAdminMiddleware(), controller.RemoveUserFromBlacklistHandler)
+			user.GET("/get/:id", controller.AuthMiddleware(), controller.RBACMiddleware("security:read"), controller.GetUserByIDHandler)
+			user.PUT("/update/:id", controller.AuthMiddleware(), controller.RBACMiddleware("security:write"), controller.UpdateUserHandler)
+			user.DELETE("/delete/:id", controller.AuthMiddleware(), controller.RBACMiddleware("security:write"), controller.DeleteUserHandler)
 		}
 		product := api.Group("/product")
 		{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"seckill_go/db"
+	"seckill_go/model"
 	"seckill_go/utils"
 	"strconv"
 	"sync"
@@ -301,6 +302,7 @@ func (s *StockService) DeductStock(ctx context.Context, productID uint) error {
 		utils.Logger.Info("Redis库存扣减成功",
 			zap.Uint("productID", productID),
 			zap.Int64("newStock", newStock))
+		s.syncStockSnapshot(productID, int(newStock))
 
 		return nil
 	}
@@ -335,11 +337,13 @@ func (s *StockService) deductStockFromMemory(productID uint) error {
 			}
 
 			// 扣减库存（在锁保护下完成）
-			mockProducts[i]["stock"] = stock - 1
+			newStock := stock - 1
+			mockProducts[i]["stock"] = newStock
 
 			utils.Logger.Info("内存库存扣减成功",
 				zap.Uint("productID", productID),
-				zap.Int("newStock", stock-1))
+				zap.Int("newStock", newStock))
+			s.syncDBStock(productID, newStock)
 			return nil
 		}
 	}
@@ -349,19 +353,19 @@ func (s *StockService) deductStockFromMemory(productID uint) error {
 
 func (s *StockService) GetStock(ctx context.Context, productID uint) (int, error) {
 	if s.redis == nil {
-		return s.getStockFromMemory(productID)
+		return s.getStockFromFallback(productID)
 	}
 
 	stockKey := StockKeyPrefix + strconv.Itoa(int(productID))
 	stock, err := s.redis.Get(ctx, stockKey).Int()
 	if err != nil {
 		if err == redis.Nil {
-			return s.getStockFromMemory(productID)
+			return s.getStockFromFallback(productID)
 		}
 		utils.Logger.Error("获取Redis库存失败", zap.Uint("productID", productID), zap.Error(err))
 		return 0, err
 	}
-
+	s.syncMemorySnapshot(productID, stock)
 	return stock, nil
 }
 
@@ -387,11 +391,13 @@ func (s *StockService) ReleaseStock(ctx context.Context, productID uint) error {
 				}
 
 				// 释放库存
-				mockProducts[i]["stock"] = stock + 1
+				newStock := stock + 1
+				mockProducts[i]["stock"] = newStock
 
 				utils.Logger.Info("内存库存释放成功",
 					zap.Uint("productID", productID),
-					zap.Int("newStock", stock+1))
+					zap.Int("newStock", newStock))
+				s.syncDBStock(productID, newStock)
 				return nil
 			}
 		}
@@ -458,6 +464,51 @@ func (s *StockService) getStockFromMemory(productID uint) (int, error) {
 	return 0, ErrStockNotFound
 }
 
+func (s *StockService) getStockFromDB(productID uint) (int, error) {
+	if db.DB == nil {
+		return 0, ErrStockNotFound
+	}
+	var product model.Product
+	if err := db.DB.First(&product, productID).Error; err != nil {
+		return 0, ErrStockNotFound
+	}
+	return product.Stock, nil
+}
+
+func (s *StockService) getStockFromFallback(productID uint) (int, error) {
+	// Redis 不可用或键缺失时，优先回退数据库，再回退内存 mock
+	if stock, err := s.getStockFromDB(productID); err == nil {
+		s.syncMemorySnapshot(productID, stock)
+		return stock, nil
+	}
+	return s.getStockFromMemory(productID)
+}
+
+func (s *StockService) syncMemorySnapshot(productID uint, stock int) {
+	s.mu.Lock()
+	for i := range mockProducts {
+		if mockProducts[i]["id"] == int(productID) {
+			mockProducts[i]["stock"] = stock
+			break
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *StockService) syncStockSnapshot(productID uint, stock int) {
+	s.syncMemorySnapshot(productID, stock)
+	s.syncDBStock(productID, stock)
+}
+
+func (s *StockService) syncDBStock(productID uint, stock int) {
+	if db.DB == nil {
+		return
+	}
+	if err := db.DB.Model(&model.Product{}).Where("id = ?", productID).Update("stock", stock).Error; err != nil {
+		utils.Logger.Warn("同步数据库库存失败", zap.Uint("productID", productID), zap.Error(err))
+	}
+}
+
 func (s *StockService) RestoreStock(ctx context.Context, productID uint, quantity int) error {
 	if s.redis == nil {
 		return s.restoreStockToMemory(productID, quantity)
@@ -507,11 +558,13 @@ func (s *StockService) restoreStockToMemory(productID uint, quantity int) error 
 	for i := range mockProducts {
 		if mockProducts[i]["id"] == int(productID) {
 			stock := mockProducts[i]["stock"].(int)
-			mockProducts[i]["stock"] = stock + quantity
+			newStock := stock + quantity
+			mockProducts[i]["stock"] = newStock
 			utils.Logger.Info("内存库存恢复成功",
 				zap.Uint("productID", productID),
 				zap.Int("quantity", quantity),
-				zap.Int("newStock", stock+quantity))
+				zap.Int("newStock", newStock))
+			s.syncDBStock(productID, newStock)
 			return nil
 		}
 	}

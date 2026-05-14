@@ -240,22 +240,23 @@
                 <button
                   class="seckill-btn"
                   @click.stop="handleSeckill(product.id)"
-                  :disabled="product.stock === 0 || seckilling[product.id]"
+                  :disabled="isSeckillDisabled(product) || seckilling[product.id]"
                   :class="{ 'seckilling': seckilling[product.id] }"
                 >
-                  <span v-if="!seckilling[product.id] && product.stock > 0">立即秒杀</span>
+                  <span v-if="!seckilling[product.id]">{{ getSeckillButtonText(product) }}</span>
                   <span v-if="seckilling[product.id]">
                     <span class="btn-spinner"></span>秒杀中...
                   </span>
-                  <span v-if="product.stock === 0">已售罄</span>
                 </button>
                 <button 
                   class="cart-btn" 
                   @click="addToCart(product)"
-                  :disabled="product.stock === 0"
-                  :class="{ 'added': isInCart(product.id) }"
+                  :disabled="product.stock === 0 || isSeckillProduct(product)"
+                  :class="{ 'added': isInCart(product.id) && !isSeckillProduct(product) }"
+                  :title="isSeckillProduct(product) ? '秒杀商品仅支持立即秒杀' : ''"
                 >
-                  <span v-if="!isInCart(product.id)">🛒</span>
+                  <span v-if="isSeckillProduct(product)">⚠</span>
+                  <span v-else-if="!isInCart(product.id)">🛒</span>
                   <span v-else>✓</span>
                 </button>
               </div>
@@ -362,21 +363,21 @@
               <button 
                 class="detail-seckill-btn"
                 @click="handleSeckillFromDetail"
-                :disabled="selectedProduct.stock === 0 || seckilling[selectedProduct.id]"
+                :disabled="isSeckillDisabled(selectedProduct) || seckilling[selectedProduct.id]"
               >
-                <span v-if="!seckilling[selectedProduct.id] && selectedProduct.stock > 0">立即秒杀</span>
+                <span v-if="!seckilling[selectedProduct.id]">{{ getSeckillButtonText(selectedProduct) }}</span>
                 <span v-if="seckilling[selectedProduct.id]">
                   <span class="btn-spinner"></span>秒杀中...
                 </span>
-                <span v-if="selectedProduct.stock === 0">已售罄</span>
               </button>
               <button 
                 class="detail-cart-btn"
                 @click="addToCart(selectedProduct)"
-                :disabled="selectedProduct.stock === 0"
-                :class="{ 'added': isInCart(selectedProduct.id) }"
+                :disabled="selectedProduct.stock === 0 || isSeckillProduct(selectedProduct)"
+                :class="{ 'added': isInCart(selectedProduct.id) && !isSeckillProduct(selectedProduct) }"
               >
-                <span v-if="!isInCart(selectedProduct.id)">加入购物车</span>
+                <span v-if="isSeckillProduct(selectedProduct)">秒杀商品仅支持立即秒杀</span>
+                <span v-else-if="!isInCart(selectedProduct.id)">加入购物车</span>
                 <span v-else>已在购物车</span>
               </button>
             </div>
@@ -1738,6 +1739,48 @@ const getStockClass = (product) => {
   return 'in-stock';
 };
 
+const getSeckillMeta = (product) => product?.seckill || {};
+const isSeckillProduct = (product) => {
+  if (!product) return false;
+  const meta = getSeckillMeta(product);
+  return Boolean(meta.has_event || product.isSeckill);
+};
+
+const sanitizeSeckillItemsInCart = (notify = false) => {
+  const before = cart.value.length;
+  if (before === 0) return 0;
+  cart.value = cart.value.filter((item) => {
+    const product = products.value.find((p) => Number(p.id) === Number(item.id));
+    const byRuntime = isSeckillProduct(product);
+    return !(item.isSeckill || byRuntime);
+  });
+  const removed = before - cart.value.length;
+  if (removed > 0) {
+    localStorage.setItem('cart', JSON.stringify(cart.value));
+    if (notify) {
+      showToastMessage('秒杀商品不能通过购物车结算，请使用“立即秒杀”', 'warning');
+    }
+  }
+  return removed;
+};
+
+const isSeckillAvailableNow = (product) => {
+  const meta = getSeckillMeta(product);
+  return Boolean(meta.has_event && meta.can_seckill && product?.stock > 0);
+};
+
+const isSeckillDisabled = (product) => !isSeckillAvailableNow(product);
+
+const getSeckillButtonText = (product) => {
+  if (!product) return '秒杀';
+  if (product.stock === 0) return '已售罄';
+  const meta = getSeckillMeta(product);
+  if (!meta.has_event) return '未配置活动';
+  if (meta.status === 'not_started') return '秒杀未开始';
+  if (meta.status === 'ended') return '活动已结束';
+  return '立即秒杀';
+};
+
 // 根据商品文案推断分类，保证前端筛选仍可用
 const inferCategoryByText = (name = '', description = '') => {
   const text = `${name} ${description}`.toLowerCase();
@@ -1768,7 +1811,15 @@ const mapApiProductToViewModel = (product) => {
     category,
     brand: product.brand || '商城',
     tags: Array.isArray(product.tags) ? product.tags : [],
-    specs: product.specs || {}
+    specs: product.specs || {},
+    seckill: product.seckill || {
+      has_event: false,
+      start_time: '',
+      end_time: '',
+      can_seckill: false,
+      status: 'no_event',
+      status_text: '商品未绑定秒杀活动'
+    }
   };
 };
 
@@ -1793,6 +1844,7 @@ const fetchProducts = async () => {
     error.value = '';
   } finally {
     loading.value = false;
+    sanitizeSeckillItemsInCart(false);
   }
 };
 
@@ -1856,8 +1908,12 @@ const handleSeckillFromDetail = () => {
 const handleSeckill = async (productId) => {
   try {
     const product = products.value.find(p => p.id === productId);
-    if (!product || product.stock === 0) {
-      showToastMessage('商品信息错误或已售罄', 'error');
+    if (!product) {
+      showToastMessage('商品信息错误', 'error');
+      return;
+    }
+    if (!isSeckillAvailableNow(product)) {
+      showToastMessage(product.seckill?.status_text || getSeckillButtonText(product), 'warning');
       return;
     }
 
@@ -1987,6 +2043,10 @@ const confirmCaptchaAndSeckill = async () => {
 
 // 添加到购物车
 const addToCart = (product) => {
+  if (isSeckillProduct(product)) {
+    showToastMessage('秒杀商品仅支持立即秒杀，不能加入购物车', 'warning');
+    return;
+  }
   if (product.stock === 0) {
     showToastMessage('商品已售罄', 'error');
     return;
@@ -2002,7 +2062,8 @@ const addToCart = (product) => {
     id: product.id,
     name: product.name,
     price: product.price,
-    image: product.image
+    image: product.image,
+    isSeckill: false
   });
   
   localStorage.setItem('cart', JSON.stringify(cart.value));
@@ -2023,6 +2084,7 @@ const isInCart = (productId) => {
 
 // 结算
 const checkout = () => {
+  sanitizeSeckillItemsInCart(true);
   if (cart.value.length === 0) {
     showToastMessage('购物车是空的', 'warning');
     return;

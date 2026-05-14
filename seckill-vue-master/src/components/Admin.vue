@@ -352,6 +352,9 @@
                 </svg>
                 刷新
               </button>
+              <button class="btn btn-secondary" @click="openCreateEventModal">
+                配置秒杀活动
+              </button>
             </div>
           </div>
 
@@ -378,7 +381,9 @@
                   <th>库存</th>
                   <th>销量</th>
                   <th>转化率</th>
-                  <th>秒杀</th>
+                  <th>秒杀状态</th>
+                  <th>开始时间</th>
+                  <th>结束时间</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -398,12 +403,20 @@
                     </span>
                   </td>
                   <td>
-                    <span :class="['status-badge', product.isSeckill ? 'seckill' : 'normal']">
-                      {{ product.isSeckill ? '是' : '否' }}
+                    <span :class="['status-badge', getEventStatusClass(product.seckillStatus)]">
+                      {{ getEventStatusText(product.seckillStatus) }}
                     </span>
                   </td>
+                  <td>{{ formatEventTime(product.eventStartTime) }}</td>
+                  <td>{{ formatEventTime(product.eventEndTime) }}</td>
                   <td>
                     <div class="action-buttons">
+                      <button class="btn-icon" title="配置活动" @click="configureProductEvent(product)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <circle cx="12" cy="12" r="3"/>
+                          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                        </svg>
+                      </button>
                       <button class="btn-icon" title="编辑商品" @click="editProduct(product)">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -430,6 +443,65 @@
                 <path d="M16 10a4 4 0 1 1-8 0"/>
               </svg>
               <p>暂无商品数据</p>
+            </div>
+          </div>
+
+          <div class="section-header event-section-header">
+            <h3 class="section-title">秒杀活动管理</h3>
+            <button class="btn btn-primary" @click="fetchEvents">刷新活动</button>
+          </div>
+          <div v-if="eventsLoading" class="loading-overlay">
+            <div class="spinner"></div>
+            <p>正在加载活动数据...</p>
+          </div>
+          <div v-if="eventsError && !eventsLoading" class="error-message">
+            <p>{{ eventsError }}</p>
+            <button class="btn btn-secondary" @click="fetchEvents">重试</button>
+          </div>
+          <div v-if="!eventsLoading" class="table-container">
+            <table class="data-table" v-if="events.length > 0">
+              <thead>
+                <tr>
+                  <th>活动ID</th>
+                  <th>商品</th>
+                  <th>开始时间</th>
+                  <th>结束时间</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="event in events" :key="event.id">
+                  <td>{{ event.id }}</td>
+                  <td>{{ event.productName }}</td>
+                  <td>{{ formatEventTime(event.start_time) }}</td>
+                  <td>{{ formatEventTime(event.end_time) }}</td>
+                  <td>
+                    <span :class="['status-badge', getEventStatusClass(event.status)]">
+                      {{ getEventStatusText(event.status) }}
+                    </span>
+                  </td>
+                  <td>
+                    <div class="action-buttons">
+                      <button class="btn-icon" title="编辑活动" @click="editEvent(event)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        </svg>
+                      </button>
+                      <button class="btn-icon danger" title="删除活动" @click="deleteEvent(event.id)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <polyline points="3 6 5 6 21 6"/>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="events.length === 0 && !eventsError && !eventsLoading" class="empty-state">
+              <p>暂无秒杀活动，请先配置活动时间</p>
             </div>
           </div>
         </div>
@@ -554,6 +626,45 @@
               <button class="btn btn-secondary" @click="closeProductModal">取消</button>
               <button class="btn btn-primary" @click="saveProduct" :disabled="!currentProduct.name || currentProduct.price <= 0 || currentProduct.stock < 0">
                 {{ productModalMode === 'create' ? '添加' : '保存' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="showEventModal" class="modal-overlay" @click.self="closeEventModal">
+          <div class="modal event-modal">
+            <div class="modal-header">
+              <h3>{{ eventModalMode === 'create' ? '创建秒杀活动' : '编辑秒杀活动' }}</h3>
+              <button class="modal-close" @click="closeEventModal">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+            <div class="modal-body">
+              <div class="form-row">
+                <label class="form-label">关联商品 *</label>
+                <select v-model.number="currentEvent.product_id" class="form-input" :disabled="eventModalMode === 'edit'">
+                  <option :value="0">请选择商品</option>
+                  <option v-for="product in products" :key="product.id" :value="product.id">
+                    {{ product.name }} (ID: {{ product.id }})
+                  </option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label class="form-label">开始时间 *</label>
+                <input type="datetime-local" v-model="currentEvent.start_time" class="form-input">
+              </div>
+              <div class="form-row">
+                <label class="form-label">结束时间 *</label>
+                <input type="datetime-local" v-model="currentEvent.end_time" class="form-input">
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" @click="closeEventModal">取消</button>
+              <button class="btn btn-primary" @click="saveEvent" :disabled="savingEvent">
+                {{ savingEvent ? '保存中...' : '保存活动' }}
               </button>
             </div>
           </div>
@@ -870,6 +981,20 @@ const currentProduct = ref({
 const uploadingImages = ref(false);
 const uploadProgress = ref(0);
 
+// 秒杀活动管理
+const events = ref([]);
+const eventsLoading = ref(false);
+const eventsError = ref('');
+const showEventModal = ref(false);
+const eventModalMode = ref('create'); // 'create' | 'edit'
+const savingEvent = ref(false);
+const currentEvent = ref({
+  id: null,
+  product_id: 0,
+  start_time: '',
+  end_time: ''
+});
+
 // 日志数据
 const logs = ref([]);
 const logsLoading = ref(false);
@@ -1161,6 +1286,214 @@ const updateOrderStatus = async (orderId, status) => {
   }
 };
 
+const normalizeDateTimeLocal = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const toRFC3339 = (dateTimeLocal) => {
+  if (!dateTimeLocal) return '';
+  const date = new Date(dateTimeLocal);
+  if (Number.isNaN(date.getTime())) return '';
+  // 统一为秒级时间，避免毫秒差异导致后端时间解析和展示不一致
+  return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+};
+
+const computeEventStatus = (startTime, endTime) => {
+  if (!startTime || !endTime) return 'no_event';
+  const now = Date.now();
+  const start = new Date(startTime).getTime();
+  const end = new Date(endTime).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end)) return 'no_event';
+  if (now < start) return 'not_started';
+  if (now > end) return 'ended';
+  return 'ongoing';
+};
+
+const getEventStatusText = (status) => {
+  switch (status) {
+    case 'not_started':
+      return '未开始';
+    case 'ongoing':
+      return '进行中';
+    case 'ended':
+      return '已结束';
+    default:
+      return '未配置';
+  }
+};
+
+const getEventStatusClass = (status) => {
+  switch (status) {
+    case 'not_started':
+      return 'pending';
+    case 'ongoing':
+      return 'active';
+    case 'ended':
+      return 'canceled';
+    default:
+      return 'normal';
+  }
+};
+
+const formatEventTime = (value) => {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  return date.toLocaleString('zh-CN');
+};
+
+const getProductNameById = (productId) => {
+  const product = products.value.find(p => Number(p.id) === Number(productId));
+  return product?.name || `商品#${productId}`;
+};
+
+const getAdminAuthConfig = () => {
+  const token = localStorage.getItem('admin_token');
+  return {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  };
+};
+
+const fetchEvents = async () => {
+  if (eventsLoading.value) return;
+  eventsLoading.value = true;
+  eventsError.value = '';
+  try {
+    const response = await axios.get('/api/event/list');
+    const list = Array.isArray(response?.data?.data) ? response.data.data : [];
+    events.value = list.map((event) => ({
+      ...event,
+      productName: getProductNameById(event.product_id),
+      status: computeEventStatus(event.start_time, event.end_time)
+    }));
+  } catch (error) {
+    console.error('获取活动列表失败:', error);
+    eventsError.value = error.response?.data?.error || error.message || '获取活动列表失败';
+  } finally {
+    eventsLoading.value = false;
+  }
+};
+
+const openCreateEventModal = () => {
+  eventModalMode.value = 'create';
+  currentEvent.value = {
+    id: null,
+    product_id: 0,
+    start_time: '',
+    end_time: ''
+  };
+  showEventModal.value = true;
+};
+
+const configureProductEvent = (product) => {
+  const existing = events.value.find(e => Number(e.product_id) === Number(product.id));
+  if (existing) {
+    editEvent(existing);
+    return;
+  }
+  eventModalMode.value = 'create';
+  currentEvent.value = {
+    id: null,
+    product_id: Number(product.id),
+    start_time: '',
+    end_time: ''
+  };
+  showEventModal.value = true;
+};
+
+const editEvent = (event) => {
+  eventModalMode.value = 'edit';
+  currentEvent.value = {
+    id: event.id,
+    product_id: Number(event.product_id),
+    start_time: normalizeDateTimeLocal(event.start_time),
+    end_time: normalizeDateTimeLocal(event.end_time)
+  };
+  showEventModal.value = true;
+};
+
+const closeEventModal = () => {
+  showEventModal.value = false;
+};
+
+const validateEventForm = () => {
+  if (!currentEvent.value.product_id) {
+    alert('商品不能为空');
+    return false;
+  }
+  if (!currentEvent.value.start_time) {
+    alert('开始时间不能为空');
+    return false;
+  }
+  if (!currentEvent.value.end_time) {
+    alert('结束时间不能为空');
+    return false;
+  }
+  const start = new Date(currentEvent.value.start_time).getTime();
+  const end = new Date(currentEvent.value.end_time).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end)) {
+    alert('时间格式不正确');
+    return false;
+  }
+  if (end <= start) {
+    alert('结束时间必须晚于开始时间');
+    return false;
+  }
+  return true;
+};
+
+const saveEvent = async () => {
+  if (savingEvent.value) return;
+  if (!validateEventForm()) return;
+  const payload = {
+    product_id: Number(currentEvent.value.product_id),
+    start_time: toRFC3339(currentEvent.value.start_time),
+    end_time: toRFC3339(currentEvent.value.end_time)
+  };
+  try {
+    savingEvent.value = true;
+    let response;
+    if (eventModalMode.value === 'create') {
+      response = await axios.post('/api/event/create', payload, getAdminAuthConfig());
+      if (response?.data?.code !== undefined && response.data.code !== 0) {
+        throw new Error(response.data.message || '活动创建失败');
+      }
+      alert('活动创建成功');
+    } else {
+      response = await axios.put(`/api/event/update/${currentEvent.value.id}`, payload, getAdminAuthConfig());
+      if (response?.data?.code !== undefined && response.data.code !== 0) {
+        throw new Error(response.data.message || '活动更新失败');
+      }
+      alert('活动更新成功');
+    }
+    closeEventModal();
+    await Promise.all([fetchEvents(), fetchProducts()]);
+  } catch (error) {
+    console.error('保存活动失败:', error);
+    alert(error.response?.data?.error || error.message || '保存活动失败');
+  } finally {
+    savingEvent.value = false;
+  }
+};
+
+const deleteEvent = async (eventId) => {
+  if (!confirm('确定要删除这个活动吗？')) return;
+  try {
+    await axios.delete(`/api/event/delete/${eventId}`, getAdminAuthConfig());
+    await Promise.all([fetchEvents(), fetchProducts()]);
+    alert('活动删除成功');
+  } catch (error) {
+    console.error('删除活动失败:', error);
+    alert(error.response?.data?.error || error.message || '删除活动失败');
+  }
+};
+
 // 获取商品列表
 const fetchProducts = async () => {
   if (productsLoading.value) return;
@@ -1182,7 +1515,15 @@ const fetchProducts = async () => {
       images: product.images || [],
       conversionRate: product.conversionRate || 0,
       sales: product.sales || 0,
-      isSeckill: product.stock > 0
+      isSeckill: Boolean(product.seckill?.has_event),
+      eventStartTime: product.seckill?.start_time || '',
+      eventEndTime: product.seckill?.end_time || '',
+      seckillStatus: product.seckill?.status || 'no_event'
+    }));
+    // 商品列表刷新后同步活动商品名称
+    events.value = events.value.map(event => ({
+      ...event,
+      productName: getProductNameById(event.product_id)
     }));
     
   } catch (error) {
@@ -1408,6 +1749,7 @@ watch(() => activeMenu.value, (newValue) => {
     fetchOrders();
   } else if (newValue === 'products') {
     fetchProducts();
+    fetchEvents();
   } else if (newValue === 'logs') {
     fetchLogs();
   }
